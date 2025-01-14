@@ -62,7 +62,7 @@ static uint8_t *svb_encode_scalar(const uint32_t *in,
 }
 
 
-#ifdef __ARM_NEON__
+#ifdef STREAMVBYTE_IS_ARM64
 #include "streamvbyte_arm_encode.c"
 #endif
 
@@ -120,7 +120,7 @@ size_t streamvbyte_encode(const uint32_t *in, uint32_t count, uint8_t *out) {
   uint32_t keyLen = (count + 3) / 4;  // 2-bits rounded to full byte
   uint8_t *dataPtr = keyPtr + keyLen; // variable byte data after all keys
 
-#if defined(__ARM_NEON__)
+#if defined(STREAMVBYTE_IS_ARM64)
 
   uint32_t count_quads = count / 4;
   count -= 4 * count_quads;

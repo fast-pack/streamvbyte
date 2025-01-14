@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.5)
 project(STREAMVBYTE VERSION "2.0.0")
 
 set(STREAMVBYTE_LIB_VERSION "2.0.0" CACHE STRING "streamvbyte library version")
@@ -95,11 +95,6 @@ endif()
 
 if(MSVC)
     add_definitions("-D__restrict__=__restrict")
-endif()
-
-# test for arm
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64.*|AARCH64.*)")
-    set(BASE_FLAGS ${BASE_FLAGS} "-D__ARM_NEON__")
 endif()
 
 set(STREAMVBYTE_SRCS

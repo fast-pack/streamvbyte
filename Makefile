@@ -5,12 +5,8 @@
 
 PROCESSOR:=$(shell uname -m)
 
-ifeq ($(PROCESSOR), aarch64)
-# for 64-bit ARM processors (e.g., Linux), they may fail to defined __ARM_NEON__
-CFLAGS = -fPIC -std=c99 -O3 -Wall -Wextra -pedantic -Wshadow -D__ARM_NEON__
-else
+
 CFLAGS = -fPIC -std=c99 -O3 -Wall -Wextra -pedantic -Wshadow
-endif
 LDFLAGS = -shared
 LIBNAME=libstreamvbyte.so.0.0.1
 LNLIBNAME=libstreamvbyte.so

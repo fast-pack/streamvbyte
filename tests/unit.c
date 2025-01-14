@@ -2827,7 +2827,7 @@ int main(void) {
   } else {
     printf("Code was not vectorized (x64).\n");
   }
-#elif defined(__ARM_NEON__)
+#elif defined(STREAMVBYTE_IS_ARM64)
   printf("Code was vectorized (ARM NEON).\n");
 #else
   printf("Warning: you tested non-vectorized code.\n");

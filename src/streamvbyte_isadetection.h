@@ -43,7 +43,9 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <stdbool.h>
 #include <stdlib.h>
 
-
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
+#define STREAMVBYTE_IS_ARM64 1
+#endif // defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
 #if defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
 #include <intrin.h>
@@ -52,7 +54,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 /* GCC-compatible compiler, targeting x86/x86-64 */
 #include <x86intrin.h>
-#elif defined(__GNUC__) && defined(__ARM_NEON__)
+#elif defined(__GNUC__) && defined(STREAMVBYTE_IS_ARM64)
 /* GCC-compatible compiler, targeting ARM with NEON */
 #include <arm_neon.h>
 #elif defined(__GNUC__) && defined(__IWMMXT__)
@@ -263,9 +265,9 @@ static inline uint32_t streamvbyte_detect_supported_architectures(void) {
 }
 #endif
 
-#ifdef __ARM_NEON__
+#ifdef STREAMVBYTE_IS_ARM64
 #define STREAMVBYTE_ARM
-#endif 
+#endif // STREAMVBYTE_IS_ARM64
 
 #ifdef STREAMVBYTE_X64
 // this is almost standard?

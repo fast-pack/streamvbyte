@@ -7,7 +7,7 @@
 #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
 #endif
 
-#ifdef __ARM_NEON__
+#ifdef STREAMVBYTE_IS_ARM64
 #include "streamvbyte_arm_decode.c"
 #endif
 
@@ -76,7 +76,7 @@ size_t streamvbyte_decode(const uint8_t *in, uint32_t *out, uint32_t count) {
     keyPtr += (count/4) & ~ 7U;
     count &= 31;
   }
-#elif defined(__ARM_NEON__)
+#elif defined(STREAMVBYTE_IS_ARM64)
   dataPtr = svb_decode_vector(out, keyPtr, dataPtr, count);
   out += count - (count & 3);
   keyPtr += count/4;
@@ -105,7 +105,7 @@ bool streamvbyte_validate_stream(const uint8_t *in, size_t inCount,
   const uint8_t *keyPtr = in;
   uint64_t encodedSize = 0;
 
-#if defined(__ARM_NEON__)
+#if defined(STREAMVBYTE_IS_ARM64)
   encodedSize = svb_validate_vector(&keyPtr, &outCount);
 #endif
 
