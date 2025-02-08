@@ -189,7 +189,7 @@ Stream VByte in other languages
 - Rust version by Trevor McCulloch ([repository](https://github.com/mccullocht/streamvbyte64))
 - Go version by Nelz ([repository](https://github.com/nelz9999/stream-vbyte-go))
 - Go version by Milan Patel (SIMD-accelerated) ([repository](https://github.com/theMPatel/streamvbyte-simdgo))
-- Go version by Michal Hruby (SIMD-accelerated) ([repository](https://github.com/mhr3/streamvbyte))
+- Go version by Michal Hruby (with SSE4 & NEON support) ([repository](https://github.com/mhr3/streamvbyte))
 - Zig version by Nick Gates ([repository](https://github.com/fulcrum-so/streamvbyte-zig))
 - Python version by Chris Seymour ([repository](https://github.com/iiSeymour/pystreamvbyte))
 
