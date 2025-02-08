@@ -185,12 +185,13 @@ the ``streamvbyte_encode_0124`` and ``streamvbyte_decode_0124`` which use
 Stream VByte in other languages
 --------------------------------
 
-* There is a [Rust version](https://bitbucket.org/marshallpierce/stream-vbyte-rust) by Marshall Pierce.
-* There is a [Go version](https://github.com/nelz9999/stream-vbyte-go) by Nelz.
-* There is an accelerated [Go version](https://github.com/theMPatel/streamvbyte-simdgo) by Milan Patel.
-* There is a [Zig version](https://github.com/fulcrum-so/streamvbyte-zig) by Nick Gates.
-* There is a [Python version](https://github.com/iiSeymour/pystreamvbyte) by Chris Seymour.
-* There is a [Rust version(https://github.com/mccullocht/streamvbyte64) by Trevor McCulloch.
+- Rust version by Marshall Pierce ([repository](https://bitbucket.org/marshallpierce/stream-vbyte-rust))
+- Rust version by Trevor McCulloch ([repository](https://github.com/mccullocht/streamvbyte64))
+- Go version by Nelz ([repository](https://github.com/nelz9999/stream-vbyte-go))
+- Go version by Milan Patel (SIMD-accelerated) ([repository](https://github.com/theMPatel/streamvbyte-simdgo))
+- Go version by Michal Hruby (SIMD-accelerated) ([repository](https://github.com/mhr3/streamvbyte))
+- Zig version by Nick Gates ([repository](https://github.com/fulcrum-so/streamvbyte-zig))
+- Python version by Chris Seymour ([repository](https://github.com/iiSeymour/pystreamvbyte))
 
 Format Specification
 ---------------------
