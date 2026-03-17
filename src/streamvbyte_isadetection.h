@@ -242,7 +242,7 @@ static inline uint32_t streamvbyte_detect_supported_architectures(void) {
 #endif // defined(_MSC_VER) && !defined(__clang__)
 
 
-#if defined(__sse41__)
+#if defined(__SSE4_1__)
 static inline bool streamvbyte_sse41(void) {
   return true;
 }
