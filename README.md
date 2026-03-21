@@ -37,6 +37,7 @@ This library is used by
  * [Facebook Thrift](https://github.com/facebook/fbthrift),
  * [Trinity Information Retrieval framework](https://github.com/phaistos-networks/Trinity),
  * [tilemaker](https://github.com/systemed/tilemaker).
+ * [SereneDB](https://github.com/serenedb/serenedb).
 
 # Usage
 
