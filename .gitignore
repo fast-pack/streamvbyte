@@ -3,6 +3,7 @@ dynunit
 writeseq
 perf
 example
+compress_decimal_encoded_integers
 
 # Object files
 *.o
