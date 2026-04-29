@@ -71,6 +71,9 @@ shuffle_tables: ./utils/shuffle_tables.c
 example: ./examples/example.c    $(HEADERS) $(OBJECTS)
 	$(CC) $(CFLAGS) -o example ./examples/example.c -Iinclude  $(OBJECTS)
 
+compress_decimal_encoded_integers: ./examples/compress_decimal_encoded_integers.c    $(HEADERS) $(OBJECTS)
+	$(CC) $(CFLAGS) -o compress_decimal_encoded_integers ./examples/compress_decimal_encoded_integers.c -Iinclude  $(OBJECTS)
+
 perf: ./tests/perf.c    $(HEADERS) $(OBJECTS)
 	$(CC) $(CFLAGS) -o perf ./tests/perf.c -Iinclude  $(OBJECTS) -lm
 
