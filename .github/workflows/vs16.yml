@@ -1,4 +1,4 @@
-name: VS16-CI
+name: VS-Latest-CI
 
 on:
   push:
@@ -13,23 +13,23 @@ jobs:
     if: >-
       ! contains(toJSON(github.event.commits.*.message), '[skip ci]') &&
       ! contains(toJSON(github.event.commits.*.message), '[skip github]')
-    name: windows-vs16
-    runs-on: windows-2019
+    name: windows-2025
+    runs-on: windows-2025
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {gen: Visual Studio 16 2019, mode: , arch: Win32, static: ON}
-          - {gen: Visual Studio 16 2019, mode: , arch: Win32, static: OFF}
-          - {gen: Visual Studio 16 2019, mode: , arch: x64, static: ON}
-          - {gen: Visual Studio 16 2019, mode: , arch: x64, static: OFF}
-          - {gen: Visual Studio 16 2019, mode: -T ClangCL, arch: Win32, static: ON}
-          - {gen: Visual Studio 16 2019, mode: -T ClangCL, arch: Win32, static: OFF}
-          - {gen: Visual Studio 16 2019, mode: -T ClangCL, arch: x64, static: ON}
-          - {gen: Visual Studio 16 2019, mode: -T ClangCL, arch: x64, static: OFF}
+          - {gen: Visual Studio 17 2022, mode: , arch: Win32, static: ON}
+          - {gen: Visual Studio 17 2022, mode: , arch: Win32, static: OFF}
+          - {gen: Visual Studio 17 2022, mode: , arch: x64, static: ON}
+          - {gen: Visual Studio 17 2022, mode: , arch: x64, static: OFF}
+          - {gen: Visual Studio 17 2022, mode: -T ClangCL, arch: Win32, static: ON}
+          - {gen: Visual Studio 17 2022, mode: -T ClangCL, arch: Win32, static: OFF}
+          - {gen: Visual Studio 17 2022, mode: -T ClangCL, arch: x64, static: ON}
+          - {gen: Visual Studio 17 2022, mode: -T ClangCL, arch: x64, static: OFF}
     steps:
     - name: checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Configure
       run: |
         cmake -G "${{matrix.gen}}" -A ${{matrix.arch}} "${{matrix.mode}}" -DSIMDJSON_DEVELOPER_MODE=ON -DSIMDJSON_COMPETITION=OFF -DSIMDJSON_BUILD_STATIC=${{matrix.static}} -DSTREAMVBYTE_ENABLE_EXAMPLES=ON -DSTREAMVBYTE_ENABLE_TESTS=ON -DSTREAMVBYTE_WALL=ON -DSTREAMVBYTE_WERROR=ON -B build

@@ -161,6 +161,11 @@ option(STREAMVBYTE_ENABLE_EXAMPLES "Enable examples for streamvbyte" OFF)
 if(STREAMVBYTE_ENABLE_EXAMPLES)
     add_executable(example ${PROJECT_SOURCE_DIR}/examples/example.c)
     target_link_libraries(example streamvbyte)
+
+    if(NOT MSVC)
+        add_executable(compress_decimal_encoded_integers ${PROJECT_SOURCE_DIR}/examples/compress_decimal_encoded_integers.c)
+        target_link_libraries(compress_decimal_encoded_integers streamvbyte)
+    endif()
 endif()
 
 option(STREAMVBYTE_ENABLE_TESTS "Enable unit tests for streamvbyte" OFF)

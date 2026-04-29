@@ -1,9 +1,9 @@
 streamvbyte
 ===========
 [![Ubuntu 22.04 CI (GCC 9, 10, 11 and 12, LLVM 12, 13, 14)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu22.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu22.yml)
-[![Ubuntu 20.04 CI (GCC 9.4 and 10, LLVM 10 and 11)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu20.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu20.yml)
+[![Ubuntu 24.04 CI (GCC 13, 14, LLVM 17, 18)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu24.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu24.yml)
 [![macOS 11 CI (LLVM 13, GCC 10, 11, 12)](https://github.com/lemire/streamvbyte/actions/workflows/macos.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/macos.yml)
-[![VS16-CI](https://github.com/lemire/streamvbyte/actions/workflows/vs16.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/vs16.yml)
+[![VS-Latest-CI](https://github.com/lemire/streamvbyte/actions/workflows/vs16.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/vs16.yml)
 [![VS17-CI](https://github.com/lemire/streamvbyte/actions/workflows/vs.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/vs.yml)
 
 StreamVByte is a new integer compression technique that applies SIMD instructions (vectorization) to
@@ -43,6 +43,19 @@ This library is used by
 
 
 See `examples/example.c` for an example.
+
+The `examples/compress_decimal_encoded_integers.c` program reads decimal-encoded
+32-bit unsigned integers (whitespace-separated) from a text file, compresses
+them with StreamVByte, and reports the resulting compression ratio. When the
+examples are enabled in the CMake build (`-DSTREAMVBYTE_ENABLE_EXAMPLES=ON`),
+it is built as `compress_decimal_encoded_integers` and may be invoked as:
+
+```
+./build/compress_decimal_encoded_integers IN_FILENAME [OUT_FILENAME]
+```
+
+If the optional `OUT_FILENAME` is provided, the compressed bytes are written
+to that file. This example is not built under MSVC because it uses POSIX I/O.
 
 Short code sample:
 ```C

@@ -1,4 +1,4 @@
-name: Ubuntu 20.04 CI (GCC 9.4 and 10, LLVM 10 and 11)
+name: Ubuntu 24.04 CI (GCC 13, 14, LLVM 17, 18)
 
 on:
   push:
@@ -13,17 +13,19 @@ jobs:
     if: >-
       ! contains(toJSON(github.event.commits.*.message), '[skip ci]') &&
       ! contains(toJSON(github.event.commits.*.message), '[skip github]')
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         include:
           - {compiler: gcc}
-          - {compiler: gcc-10}
+          - {compiler: gcc-13}
+          - {compiler: gcc-14}
           - {compiler: clang}
-          - {compiler: clang-11}
+          - {compiler: clang-17}
+          - {compiler: clang-18}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Use cmake (debug)
         run: |
           mkdir builddebug &&
