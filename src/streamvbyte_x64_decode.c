@@ -50,37 +50,9 @@ static inline const uint8_t *svb_decode_sse41_simple(uint32_t *out,
     const uint64_t *keyPtr64 = (const uint64_t *)keyPtr - Offset;
     uint64_t nextkeys;
     memcpy(&nextkeys, keyPtr64 + Offset, sizeof(nextkeys));
-    for (; Offset != 0; ++Offset) {
+    for (; Offset != 1; ++Offset) {
       uint64_t keys = nextkeys;
       memcpy(&nextkeys, keyPtr64 + Offset + 1, sizeof(nextkeys));
-
-      Data = svb_decode_sse41((keys & 0xFF), &dataPtr);
-      svb_write_sse41(out, Data);
-      Data = svb_decode_sse41((keys & 0xFF00) >> 8, &dataPtr);
-      svb_write_sse41(out + 4, Data);
-
-      keys >>= 16;
-      Data = svb_decode_sse41((keys & 0xFF), &dataPtr);
-      svb_write_sse41(out + 8, Data);
-      Data = svb_decode_sse41((keys & 0xFF00) >> 8, &dataPtr);
-      svb_write_sse41(out + 12, Data);
-
-      keys >>= 16;
-      Data = svb_decode_sse41((keys & 0xFF), &dataPtr);
-      svb_write_sse41(out + 16, Data);
-      Data = svb_decode_sse41((keys & 0xFF00) >> 8, &dataPtr);
-      svb_write_sse41(out + 20, Data);
-
-      keys >>= 16;
-      Data = svb_decode_sse41((keys & 0xFF), &dataPtr);
-      svb_write_sse41(out + 24, Data);
-      Data = svb_decode_sse41((keys & 0xFF00) >> 8, &dataPtr);
-      svb_write_sse41(out + 28, Data);
-
-      out += 32;
-    }
-    {
-      uint64_t keys = nextkeys;
 
       Data = svb_decode_sse41((keys & 0xFF), &dataPtr);
       svb_write_sse41(out, Data);
