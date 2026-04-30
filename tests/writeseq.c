@@ -45,6 +45,7 @@ int main(void) {
   // here the result is stored in compressedbuffer using compsize bytes
   size_t compsize2 = streamvbyte_decode(compressedbuffer, recovdata,
                                         N); // decoding (fast)
+  (void)compsize2;
   assert(compsize == compsize2);
   free(datain);
   free(compressedbuffer);
