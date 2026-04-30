@@ -48,11 +48,9 @@ static inline const uint8_t *svb_decode_sse41_simple(uint32_t *out,
     int64_t Offset = -(int64_t)keybytes / 8 + 1;
 
     const uint64_t *keyPtr64 = (const uint64_t *)keyPtr - Offset;
-    uint64_t nextkeys;
-    memcpy(&nextkeys, keyPtr64 + Offset, sizeof(nextkeys));
+    uint64_t keys;
     for (; Offset != 1; ++Offset) {
-      uint64_t keys = nextkeys;
-      memcpy(&nextkeys, keyPtr64 + Offset + 1, sizeof(nextkeys));
+      memcpy(&keys, keyPtr64 + Offset, sizeof(keys));
 
       Data = svb_decode_sse41((keys & 0xFF), &dataPtr);
       svb_write_sse41(out, Data);
