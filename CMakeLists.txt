@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.5)
-project(STREAMVBYTE VERSION "2.0.0")
+cmake_minimum_required(VERSION 3.10)
+project(STREAMVBYTE VERSION "3.0.0")
 
-set(STREAMVBYTE_LIB_VERSION "2.0.0" CACHE STRING "streamvbyte library version")
-set(STREAMVBYTE_LIB_SOVERSION "2" CACHE STRING "streamvbyte library soversion")
+set(STREAMVBYTE_LIB_VERSION "3.0.0" CACHE STRING "streamvbyte library version")
+set(STREAMVBYTE_LIB_SOVERSION "3" CACHE STRING "streamvbyte library soversion")
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
