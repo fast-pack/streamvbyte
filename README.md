@@ -2,13 +2,17 @@ streamvbyte
 ===========
 [![Ubuntu 22.04 CI (GCC 9, 10, 11 and 12, LLVM 12, 13, 14)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu22.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu22.yml)
 [![Ubuntu 24.04 CI (GCC 13, 14, LLVM 17, 18)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu24.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/ubuntu24.yml)
-[![macOS 11 CI (LLVM 13, GCC 10, 11, 12)](https://github.com/lemire/streamvbyte/actions/workflows/macos.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/macos.yml)
+[![macOS CI](https://github.com/lemire/streamvbyte/actions/workflows/macos.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/macos.yml)
 [![VS-Latest-CI](https://github.com/lemire/streamvbyte/actions/workflows/vs16.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/vs16.yml)
 [![VS17-CI](https://github.com/lemire/streamvbyte/actions/workflows/vs.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/vs.yml)
 
-StreamVByte is a new integer compression technique that applies SIMD instructions (vectorization) to
+StreamVByte is an integer compression technique that applies SIMD instructions (vectorization) to
 Google's Group Varint approach. The net result is faster than other byte-oriented compression
 techniques.
+
+Both the encoder and the decoder are vectorized: there is an optimized path using SSE 4.1 on
+x64 processors and one using NEON on 64-bit ARM (AArch64) processors. A portable scalar
+fallback is used otherwise, and the appropriate path is selected at runtime.
 
 The approach is patent-free, the code is available under the Apache License.
 
@@ -129,13 +133,15 @@ cmake --install build
 #### Benchmarking with CMake
 
 
-After building, you may run our benchmark as follows:
+After building (with `-DSTREAMVBYTE_ENABLE_TESTS=ON`), you may run our benchmark as follows:
 
 ```
-./build/test/perf
+./build/perf
 ```
 
-The benchmarks are not currently built under Windows.
+On Apple Silicon, run it with `sudo` to enable the hardware performance counters
+(instructions, cycles, branch and cache misses); on Linux you may instead relax
+`kernel.perf_event_paranoid`. The benchmarks are not currently built under Windows.
 
 
 ### 2. Building with Makefile:
@@ -179,6 +185,24 @@ zigzag_encode(mysignedints, myunsignedints, number); // mysignedints => myunsign
 
 zigzag_decode(myunsignedints, mysignedints, number); // myunsignedints => mysignedints
 ```
+
+Performance
+-----------
+
+StreamVByte sustains multi-gigabyte-per-second throughput for both encoding and
+decoding. The exact speed depends on the data distribution and on your hardware.
+As an illustration, the `perf` benchmark (500,000 random 32-bit integers per run,
+throughput measured against the 2 MB uncompressed input) reports the following on
+an Apple M4 Max:
+
+| data distribution            | encode    | decode    |
+|------------------------------|-----------|-----------|
+| mixed 1–4 byte (log-uniform) | ~27 GB/s  | ~41 GB/s  |
+| full-range (mostly 4 byte)   | ~26 GB/s  | ~33 GB/s  |
+| small values (1 byte)        | ~27 GB/s  | ~36 GB/s  |
+
+You can reproduce these numbers with `./build/perf` after building the tests
+(see the Benchmarking instructions above).
 
 Technical posts
 ---------------
