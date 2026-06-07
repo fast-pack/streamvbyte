@@ -1,6 +1,0 @@
-language: c
-sudo: false
-compiler:
-  - clang
-
-script: make && ./unit && make example && ./example && make perf && ./perf && mkdir build && cd build && cmake .. && make && make test
