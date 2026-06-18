@@ -14,6 +14,9 @@ Both the encoder and the decoder are vectorized: there is an optimized path usin
 x64 processors and one using NEON on 64-bit ARM (AArch64) processors. A portable scalar
 fallback is used otherwise, and the appropriate path is selected at runtime.
 
+For `riscv64`, the current portability path is this scalar fallback. There is no dedicated
+RVV backend yet.
+
 The approach is patent-free, the code is available under the Apache License.
 
 

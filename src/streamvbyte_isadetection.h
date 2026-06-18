@@ -46,12 +46,29 @@ POSSIBILITY OF SUCH DAMAGE.
 #if defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
 #define STREAMVBYTE_IS_ARM64 1
 #endif // defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
+
+#if defined(__riscv)
+#define STREAMVBYTE_IS_RISCV 1
+#if defined(__riscv_xlen) && (__riscv_xlen == 64)
+#define STREAMVBYTE_IS_RISCV64 1
+#endif
+#endif
+
+#ifndef STREAMVBYTE_IS_RISCV
+#define STREAMVBYTE_IS_RISCV 0
+#endif
+
+#ifndef STREAMVBYTE_IS_RISCV64
+#define STREAMVBYTE_IS_RISCV64 0
+#endif
+
 #if defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
 #include <intrin.h>
 #include <tmmintrin.h>
 #include <smmintrin.h>
-#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__)) &&       \
+    !defined(__riscv)
 /* GCC-compatible compiler, targeting x86/x86-64 */
 #include <x86intrin.h>
 #elif defined(__GNUC__) && defined(STREAMVBYTE_IS_ARM64)
@@ -110,7 +127,7 @@ static inline uint32_t dynamic_streamvbyte_detect_supported_architectures(void) 
 
 #endif
 
-#elif defined(__x86_64__) || defined(_M_AMD64) // x64
+#elif (defined(__x86_64__) || defined(_M_AMD64)) && !defined(__riscv) // x64
 
 
 
@@ -193,7 +210,7 @@ static inline uint32_t dynamic_streamvbyte_detect_supported_architectures(void) 
 #endif // end SIMD extension detection code
 
 
-#if defined(__x86_64__) || defined(_M_AMD64) // x64
+#if (defined(__x86_64__) || defined(_M_AMD64)) && !defined(__riscv) // x64
 #define STREAMVBYTE_X64
 #if defined(__cplusplus)
 #include <atomic>

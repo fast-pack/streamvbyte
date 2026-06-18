@@ -12,6 +12,11 @@ include(cmake/CPM.cmake)
 include(CheckCCompilerFlag)
 include(GNUInstallDirs)
 
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" STREAMVBYTE_SYSTEM_PROCESSOR)
+if(STREAMVBYTE_SYSTEM_PROCESSOR MATCHES "^riscv(32|64)?$")
+    message(STATUS "RISC-V target detected; streamvbyte will use the scalar fallback path")
+endif()
+
 option(STREAMVBYTE_WERROR "Treat warnings as errors." OFF)
 option(STREAMVBYTE_WALL "Emit all warnings during compilation." ON)
 
@@ -196,6 +201,27 @@ if(STREAMVBYTE_ENABLE_TESTS)
     add_executable(unit ${PROJECT_SOURCE_DIR}/tests/unit.c)
     target_link_libraries(unit streamvbyte)
     target_include_directories(unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+    if(NOT MSVC)
+        add_library(riscv_compile_smoke OBJECT
+            ${STREAMVBYTE_SRCS}
+            ${PROJECT_SOURCE_DIR}/tests/riscv_compile_smoke.c
+        )
+        target_include_directories(
+            riscv_compile_smoke
+            PRIVATE
+                ${PROJECT_SOURCE_DIR}/include
+                ${PROJECT_SOURCE_DIR}/src
+        )
+        target_compile_options(
+            riscv_compile_smoke
+            PRIVATE
+                -D__riscv=1
+                -D__riscv_xlen=64
+                -U__x86_64__
+                -U__amd64__
+        )
+    endif()
 
     enable_testing()
 
