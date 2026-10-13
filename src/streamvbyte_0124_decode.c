@@ -212,17 +212,14 @@ bool streamvbyte_validate_stream_0124(const uint8_t *in, size_t inCount,
   }
   outCount &= 3;
 
-  // Process the remainder one at a time
-  uint8_t shift = 0;
-  uint32_t key = *keyPtr++;
-  for (uint32_t c = 0; c < outCount; c++) {
-    if (shift == 8) {
-      shift = 0;
-      key = *keyPtr++;
+  // Process the remainder (fewer than 4 values, so at most one key). Read the
+  // key only if there is a remainder: otherwise in[keyLen] may be past the end.
+  if (outCount) {
+    const uint32_t key = *keyPtr;
+    for (uint8_t shift = 0; shift < 2 * outCount; shift += 2) {
+      const uint8_t code = (key >> shift) & 0x3;
+      encodedSize += (1 << code) >> 1;
     }
-    const uint8_t code = (key >> shift) & 0x3;
-    encodedSize += (1 << code) >> 1;
-    shift += 2;
   }
 
   return encodedSize == inCount - keyLen;

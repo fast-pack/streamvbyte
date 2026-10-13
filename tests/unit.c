@@ -49,12 +49,18 @@ static uint8_t *guardedpage(size_t *pageSize) {
   long size = sysconf(_SC_PAGESIZE);
   if (size <= 0) return NULL;
   *pageSize = (size_t)size;
+#if defined(MAP_ANON)
+  // macOS cannot map /dev/zero, but exposes MAP_ANON even in strict C99.
+  void *pages = mmap(NULL, 2 * *pageSize, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANON, -1, 0);
+#else
   // /dev/zero works with strict C99 without MAP_ANONYMOUS feature macros.
   int fd = open("/dev/zero", O_RDWR);
   if (fd < 0) return NULL;
   void *pages = mmap(NULL, 2 * *pageSize, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE, fd, 0);
   close(fd);
+#endif
   if (pages == MAP_FAILED) return NULL;
   if (mprotect((uint8_t *)pages + *pageSize, *pageSize, PROT_NONE) != 0) {
     munmap(pages, 2 * *pageSize);
@@ -146,6 +152,19 @@ static bool unpaddedtests(void) {
         printf("[unpadded] mismatch count=%u pattern=%u\n", count, pattern);
         goto cleanup;
       }
+    }
+  }
+  if (inputPage) {
+    // A key-only stream ending at a guard page: validation must not read past
+    // the last key. Key 0 is valid for 0124 (four zeros, no data bytes) but
+    // invalid for the 1234 format. Write the key directly: the SIMD encoders
+    // need padding past the end of the output.
+    uint8_t *keyOnly = inputPage + inputPageSize - 1;
+    *keyOnly = 0;
+    if (!streamvbyte_validate_stream_0124(keyOnly, 1, 4) ||
+        streamvbyte_validate_stream(keyOnly, 1, 4)) {
+      printf("[unpadded] key-only stream validation failed\n");
+      goto cleanup;
     }
   }
   ok = true;
