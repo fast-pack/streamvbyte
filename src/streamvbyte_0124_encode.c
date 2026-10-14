@@ -2,6 +2,7 @@
 #include "streamvbyte_isadetection.h"
 #include "streamvbyte_shuffle_tables_0124_encode.h"
 
+#include "streamvbyte_endian.h"
 #include <string.h> // for memcpy
 
 #ifdef __clang__
@@ -20,11 +21,11 @@ static uint8_t svb_encode_data(uint32_t val, uint8_t *__restrict__ *dataPtrPtr) 
     *dataPtrPtr += 1;
     code = 1;
   } else if (val < (1 << 16)) { // 2 bytes
-    memcpy(dataPtr, &val, 2);   // assumes little endian
+    svb_store_le(dataPtr, val, 2);
     *dataPtrPtr += 2;
     code = 2;
   } else { // 4 bytes
-    memcpy(dataPtr, &val, sizeof(uint32_t));
+    svb_store_le(dataPtr, val, sizeof(uint32_t));
     *dataPtrPtr += sizeof(uint32_t);
     code = 3;
   }
