@@ -15,8 +15,8 @@ jobs:
       ! contains(toJSON(github.event.commits.*.message), '[skip github]')
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
         with:
           platforms: s390x
       - name: Build and test
