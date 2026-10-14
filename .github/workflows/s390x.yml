@@ -1,0 +1,30 @@
+name: s390x (big endian) CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  s390x-build:
+    if: >-
+      ! contains(toJSON(github.event.commits.*.message), '[skip ci]') &&
+      ! contains(toJSON(github.event.commits.*.message), '[skip github]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: s390x
+      - name: Build and test
+        run: |
+          docker run --rm --platform linux/s390x -v "$PWD":/src -w /src debian:stable-slim sh -c '
+            apt-get update -qq &&
+            apt-get install -y -qq gcc g++ cmake make git ca-certificates > /dev/null &&
+            cmake -B build -DSTREAMVBYTE_ENABLE_EXAMPLES=ON -DSTREAMVBYTE_ENABLE_TESTS=ON -DSTREAMVBYTE_WALL=ON -DSTREAMVBYTE_WERROR=ON &&
+            cmake --build build -j4 &&
+            ctest --test-dir build --output-on-failure &&
+            ./build/example'

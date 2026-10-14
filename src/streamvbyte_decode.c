@@ -1,6 +1,7 @@
 #include "streamvbyte.h"
 #include "streamvbyte_isadetection.h"
 
+#include "streamvbyte_endian.h"
 #include <string.h> // for memcpy
 
 #ifdef __clang__
@@ -23,15 +24,13 @@ static inline uint32_t svb_decode_data(const uint8_t **dataPtrPtr, uint8_t code)
     val = (uint32_t)*dataPtr;
     dataPtr += 1;
   } else if (code == 1) { // 2 bytes
-    val = 0;
-    memcpy(&val, dataPtr, 2); // assumes little endian
+    val = svb_load_le(dataPtr, 2);
     dataPtr += 2;
   } else if (code == 2) { // 3 bytes
-    val = 0;
-    memcpy(&val, dataPtr, 3); // assumes little endian
+    val = svb_load_le(dataPtr, 3);
     dataPtr += 3;
   } else { // code == 3
-    memcpy(&val, dataPtr, 4);
+    val = svb_load_le(dataPtr, 4);
     dataPtr += 4;
   }
 
