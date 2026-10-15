@@ -79,16 +79,32 @@ streamvbyte_delta_decode(compressedbuffer, recovdata, N,0); // decoding (fast)
 You have to know how many integers were coded when you decompress. You can store this
 information along with the compressed stream.
 
-During decoding, the library may read up to `STREAMVBYTE_PADDING` extra bytes
-from the input buffer (these bytes are read but never used).
+`streamvbyte_decode` may read up to `STREAMVBYTE_PADDING` extra bytes
+from the input buffer (these bytes are read but never used). The caller must
+provide readable padding even after validating the stream.
+
+For an ordinary StreamVByte stream stored without padding (for example, at the
+end of a file mapping or in an exactly sized allocation), use:
+```C
+size_t usedbytes = streamvbyte_decode_unpadded(compressedbuffer, recovdata, N);
+```
+This uses the same encoded format, count and return value as `streamvbyte_decode`.
+It uses the existing SIMD decoder for a prefix and decodes the tail scalarly,
+without allocating or copying the input. Short streams are decoded entirely
+scalarly, so there can be a performance cost compared with padded decoding.
+The input must still contain a complete valid stream: this is not a checked
+decoder. It does not support the `0124` or differential formats, whose decoders
+still require padding. Encoder buffer requirements are unchanged; encode into
+a buffer of at least `streamvbyte_max_compressedbytes(N)` bytes, then store or
+copy the returned number of bytes.
 
 To verify that the expected size of a stream is correct you may validate it before
 decoding:
 ```C
 // compressedbuffer, compsize, recovdata, N are as above
 if (streamvbyte_validate_stream(compressedbuffer, compsize, N)) {
-    // the stream is safe to decode
-    streamvbyte_decode(compressedbuffer, recovdata, N);
+    // no readable padding is needed with this decoder
+    streamvbyte_decode_unpadded(compressedbuffer, recovdata, N);
 } else {
     // there's a mismatch between the expected size of the data (N) and the contents of
     // the stream, so performing a decode is unsafe since the behaviour is undefined

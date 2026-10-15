@@ -58,31 +58,49 @@ static const uint8_t *svb_decode_scalar(uint32_t *outPtr, const uint8_t *keyPtr,
   return dataPtr; // pointer to first unused byte after end
 }
 
-// Read count 32-bit integers in maskedvbyte format from in, storing the result
+// Read count 32-bit integers in Stream VByte format from in, storing the result
 // in out.  Returns the number of bytes read.
-size_t streamvbyte_decode(const uint8_t *in, uint32_t *out, uint32_t count) {
+static inline size_t svb_decode(const uint8_t *in, uint32_t *out, uint32_t count,
+                                uint32_t simd_count) {
   if (count == 0)
     return 0;
 
   const uint8_t *keyPtr = in;               // full list of keys is next
-  uint32_t keyLen = ((count + 3) / 4);      // 2-bits per key (rounded up)
+  uint32_t keyLen = count / 4 + (count % 4 != 0); // 2-bits per key (rounded up)
   const uint8_t *dataPtr = keyPtr + keyLen; // data starts at end of keys
 
 #ifdef STREAMVBYTE_X64
   if(streamvbyte_sse41()) {
-    dataPtr = svb_decode_sse41_simple(out, keyPtr, dataPtr, count);
-    out += count & ~ 31U;
-    keyPtr += (count/4) & ~ 7U;
-    count &= 31;
+    simd_count &= ~31U;
+    dataPtr = svb_decode_sse41_simple(out, keyPtr, dataPtr, simd_count);
+    out += simd_count;
+    keyPtr += simd_count / 4;
+    count -= simd_count;
   }
 #elif defined(STREAMVBYTE_IS_ARM64)
-  dataPtr = svb_decode_vector(out, keyPtr, dataPtr, count);
-  out += count - (count & 3);
-  keyPtr += count/4;
-  count &= 3;
+  simd_count &= ~3U;
+  dataPtr = svb_decode_vector(out, keyPtr, dataPtr, simd_count);
+  out += simd_count;
+  keyPtr += simd_count / 4;
+  count -= simd_count;
+#else
+  (void)simd_count;
 #endif
 
   return (size_t)(svb_decode_scalar(out, keyPtr, dataPtr, count) - in);
+}
+
+size_t streamvbyte_decode(const uint8_t *in, uint32_t *out, uint32_t count) {
+  return svb_decode(in, out, count, count);
+}
+
+size_t streamvbyte_decode_unpadded(const uint8_t *in, uint32_t *out, uint32_t count) {
+  // Each value uses at least one data byte. Leave at least 16 values for
+  // scalar decoding so every preceding 16-byte SIMD load stays in the stream.
+  // Round down to whole SIMD batches in svb_decode, preserving key boundaries.
+  const uint32_t simd_count = count > STREAMVBYTE_PADDING
+                                 ? count - STREAMVBYTE_PADDING : 0;
+  return svb_decode(in, out, count, simd_count);
 }
 
 bool streamvbyte_validate_stream(const uint8_t *in, size_t inCount,
