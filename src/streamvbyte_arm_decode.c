@@ -3,7 +3,7 @@
 #include "streamvbyte_isadetection.h"
 #ifdef STREAMVBYTE_ARM
 #include "streamvbyte_shuffle_tables_decode.h"
-#ifdef __aarch64__
+#ifdef STREAMVBYTE_IS_ARM64
 typedef uint8x16_t decode_t;
 #else
 typedef uint8x8x2_t decode_t;
@@ -12,7 +12,7 @@ static inline decode_t  _decode_neon(const uint8_t key,
 					const uint8_t * restrict *dataPtrPtr) {
 
   uint8_t len;
-  uint8_t *pshuf = (uint8_t *)&shuffleTable[key];
+  const uint8_t *pshuf = (const uint8_t *)&shuffleTable[key];
   uint8x16_t decodingShuffle = vld1q_u8(pshuf);
 
   uint8x16_t compressed = vld1q_u8(*dataPtrPtr);
@@ -23,7 +23,7 @@ static inline decode_t  _decode_neon(const uint8_t key,
 #else
   len = lengthTable[key];
 #endif
-#ifdef __aarch64__
+#ifdef STREAMVBYTE_IS_ARM64
   uint8x16_t data = vqtbl1q_u8(compressed, decodingShuffle);
 #else
   uint8x8x2_t codehalves = {{vget_low_u8(compressed), vget_high_u8(compressed)}};
@@ -37,7 +37,7 @@ static inline decode_t  _decode_neon(const uint8_t key,
 
 static void streamvbyte_decode_quad( const uint8_t * restrict *dataPtrPtr, uint8_t key, uint32_t * restrict out ) {
   decode_t data =_decode_neon( key, dataPtrPtr );
-#ifdef __aarch64__
+#ifdef STREAMVBYTE_IS_ARM64
   vst1q_u8((uint8_t *) out, data);
 #else
   vst1_u8((uint8_t *) out, data.val[0]);
