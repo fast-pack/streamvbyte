@@ -2804,7 +2804,22 @@ static bool issue69(void) {
   return true;
 }
 
+static int isadetectiontests(void) {
+#if defined(STREAMVBYTE_IS_ARM64)
+  if ((streamvbyte_detect_supported_architectures() & streamvbyte_NEON) !=
+      streamvbyte_NEON) {
+    printf("[isadetectiontests] ARM64 failed to report streamvbyte_NEON\n");
+    return -1;
+  }
+#endif
+  return 0;
+}
+
 int main(void) {
+  if (isadetectiontests() == -1) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
   if (!issue42()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (!issue69()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (zigzagtests() == -1) { printf("tests failed.\n"); return EXIT_FAILURE; }

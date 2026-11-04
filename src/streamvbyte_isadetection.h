@@ -48,9 +48,13 @@ POSSIBILITY OF SUCH DAMAGE.
 #endif // defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
 #if defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
+#if defined(_M_X64) || defined(_M_AMD64) || defined(_M_IX86)
 #include <intrin.h>
 #include <tmmintrin.h>
 #include <smmintrin.h>
+#elif defined(STREAMVBYTE_IS_ARM64)
+#include <arm_neon.h>
+#endif
 #elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 /* GCC-compatible compiler, targeting x86/x86-64 */
 #include <x86intrin.h>
@@ -94,9 +98,10 @@ static inline uint32_t dynamic_streamvbyte_detect_supported_architectures(void) 
   return streamvbyte_ALTIVEC;
 }
 
-#elif defined(__arm__) || defined(__aarch64__) // incl. armel, armhf, arm64
+#elif defined(__arm__) || defined(__aarch64__) ||                              \
+    defined(STREAMVBYTE_IS_ARM64) // incl. armel, armhf, arm64
 
-#if defined(__ARM_NEON)
+#if defined(__ARM_NEON) || defined(STREAMVBYTE_IS_ARM64)
 
 static inline uint32_t dynamic_streamvbyte_detect_supported_architectures(void) {
   return streamvbyte_NEON;
