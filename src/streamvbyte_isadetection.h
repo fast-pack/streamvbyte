@@ -53,7 +53,11 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <tmmintrin.h>
 #include <smmintrin.h>
 #elif defined(STREAMVBYTE_IS_ARM64)
+#if defined(__clang__)
 #include <arm_neon.h>
+#else
+#include <arm64_neon.h>
+#endif
 #endif
 #elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 /* GCC-compatible compiler, targeting x86/x86-64 */

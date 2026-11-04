@@ -8,8 +8,8 @@ typedef uint8x16_t decode_t;
 #else
 typedef uint8x8x2_t decode_t;
 #endif
-static inline decode_t  _decode_neon(const uint8_t key,
-					const uint8_t * restrict *dataPtrPtr) {
+static inline decode_t _decode_neon(const uint8_t key,
+                                    const uint8_t *__restrict__ *dataPtrPtr) {
 
   uint8_t len;
   const uint8_t *pshuf = (const uint8_t *)&shuffleTable[key];
@@ -35,7 +35,8 @@ static inline decode_t  _decode_neon(const uint8_t key,
   return data;
 }
 
-static void streamvbyte_decode_quad( const uint8_t * restrict *dataPtrPtr, uint8_t key, uint32_t * restrict out ) {
+static void streamvbyte_decode_quad(const uint8_t *__restrict__ *dataPtrPtr,
+                                    uint8_t key, uint32_t *__restrict__ out) {
   decode_t data =_decode_neon( key, dataPtrPtr );
 #ifdef STREAMVBYTE_IS_ARM64
   vst1q_u8((uint8_t *) out, data);
@@ -61,7 +62,8 @@ static uint64_t svb_validate_vector(const uint8_t **keyPtrPtr,
   *keyPtrPtr += count / 4;
 
   // Deal with each of the 4 keys in a separate lane
-  const int32x4_t shifts = {0, -2, -4, -6};
+  static const int32_t shift_vals[4] = {0, -2, -4, -6};
+  const int32x4_t shifts = vld1q_s32(shift_vals);
   const uint32x4_t mask = vdupq_n_u32(3);
   uint32x4_t acc0 = vdupq_n_u32(0);
   uint32x4_t acc1 = vdupq_n_u32(0);
@@ -77,6 +79,7 @@ static uint64_t svb_validate_vector(const uint8_t **keyPtrPtr,
   // Accumulate the sums and add the +1 for each element (count)
   uint64x2_t sum0 = vpaddlq_u32(acc0);
   uint64x2_t sum1 = vpaddlq_u32(acc1);
-  return sum0[0] + sum0[1] + sum1[0] + sum1[1] + count;
+  return vgetq_lane_u64(sum0, 0) + vgetq_lane_u64(sum0, 1) +
+         vgetq_lane_u64(sum1, 0) + vgetq_lane_u64(sum1, 1) + count;
 }
 #endif
