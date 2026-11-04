@@ -1,6 +1,8 @@
 #include "streamvbyte.h"
 #include "streamvbyte_isadetection.h"
+#ifdef STREAMVBYTE_X64
 #include "streamvbyte_shuffle_tables_0124_encode.h"
+#endif
 
 #include "streamvbyte_endian.h"
 #include <string.h> // for memcpy
