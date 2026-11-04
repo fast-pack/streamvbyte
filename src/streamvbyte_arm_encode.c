@@ -17,7 +17,7 @@ static inline size_t streamvbyte_encode4(uint32x4_t data, uint8_t *__restrict__ 
 
   // nops
   uint8x16_t lanebytes = vreinterpretq_u8_u32(lanecodes);
-#ifdef __aarch64__
+#ifdef STREAMVBYTE_IS_ARM64
   uint8x8_t lobytes = vqtbl1_u8( lanebytes, gatherlo );
 #else
   uint8x8x2_t twohalves = {{vget_low_u8(lanebytes), vget_high_u8(lanebytes)}};
@@ -37,7 +37,7 @@ static inline size_t streamvbyte_encode4(uint32x4_t data, uint8_t *__restrict__ 
   // shuffle in 8-byte chunks
   uint8x16_t databytes = vreinterpretq_u8_u32(data);
   uint8x16_t encodingShuffle = vld1q_u8((uint8_t *) &encodingShuffleTable[code]);
-#ifdef __aarch64__
+#ifdef STREAMVBYTE_IS_ARM64
   vst1q_u8(outData, vqtbl1q_u8(databytes, encodingShuffle));
 #else
   uint8x8x2_t datahalves = {{vget_low_u8(databytes), vget_high_u8(databytes)}};

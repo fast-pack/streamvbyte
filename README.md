@@ -5,6 +5,7 @@ streamvbyte
 [![macOS CI](https://github.com/lemire/streamvbyte/actions/workflows/macos.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/macos.yml)
 [![VS-Latest-CI](https://github.com/lemire/streamvbyte/actions/workflows/vs16.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/vs16.yml)
 [![VS17-CI](https://github.com/lemire/streamvbyte/actions/workflows/vs.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/vs.yml)
+[![VS-ARM64-CI](https://github.com/lemire/streamvbyte/actions/workflows/vs-arm64.yml/badge.svg)](https://github.com/lemire/streamvbyte/actions/workflows/vs-arm64.yml)
 
 StreamVByte is an integer compression technique that applies SIMD instructions (vectorization) to
 Google's Group Varint approach. The net result is faster than other byte-oriented compression
