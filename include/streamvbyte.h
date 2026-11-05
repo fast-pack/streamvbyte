@@ -41,7 +41,7 @@ static inline size_t streamvbyte_max_compressedbytes(const uint32_t length) {
 // return the exact number of compressed bytes given length input integers
 // runtime in O(n) wrt. in; use streamvbyte_max_compressedbyte if you
 // care about speed more than potentially over-allocating memory
-// Our decoding functions may read (but not use) STREAMVBYTE_PADDING extra bytes beyond
+// streamvbyte_decode may read (but not use) STREAMVBYTE_PADDING extra bytes beyond
 // the compressed data: the user needs to ensure that this region is allocated, and it
 // is not included by streamvbyte_compressedbytes.
 size_t streamvbyte_compressedbytes(const uint32_t* in, uint32_t length);
@@ -62,6 +62,15 @@ size_t streamvbyte_compressedbytes_0124(const uint32_t* in, uint32_t length);
 // There is no alignment requirement on the "in" pointer.
 // The out pointer should point to length * sizeof(uint32_t) bytes.
 size_t streamvbyte_decode(const uint8_t* in, uint32_t* out, uint32_t length);
+
+// Same format and return value as streamvbyte_decode, but reads only bytes
+// belonging to the encoded stream. No readable padding is required.
+// Uses SIMD for the prefix and scalar decoding for the tail; short streams
+// are decoded entirely scalarly. The input must contain a complete valid stream:
+// this function does not validate input or check its size. For untrusted input,
+// call streamvbyte_validate_stream first. Not for the 0124 or delta formats.
+// When length is zero, returns zero without reading or writing; pointers may be NULL.
+size_t streamvbyte_decode_unpadded(const uint8_t* in, uint32_t* out, uint32_t length);
 
 // Same as streamvbyte_decode but is meant to be used for streams encoded with
 // streamvbyte_encode_0124.
