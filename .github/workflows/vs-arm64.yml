@@ -1,0 +1,48 @@
+name: VS-ARM64-CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  ci:
+    if: >-
+      ! contains(toJSON(github.event.commits.*.message), '[skip ci]') &&
+      ! contains(toJSON(github.event.commits.*.message), '[skip github]')
+    name: windows-11-arm (${{matrix.arch}}${{matrix.toolset && ' ClangCL' || ''}}, shared=${{matrix.shared}})
+    runs-on: windows-11-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native ARM64 with MSVC (cl.exe)
+          - {toolset: '', arch: ARM64, shared: OFF}
+          - {toolset: '', arch: ARM64, shared: ON}
+          # Native ARM64 with clang-cl
+          - {toolset: '-T ClangCL', arch: ARM64, shared: OFF}
+          - {toolset: '-T ClangCL', arch: ARM64, shared: ON}
+          # ARM64EC (x64-compatible ABI on ARM64) with MSVC
+          - {toolset: '', arch: ARM64EC, shared: OFF}
+          - {toolset: '', arch: ARM64EC, shared: ON}
+    steps:
+    - name: checkout
+      uses: actions/checkout@v7
+    - name: Configure
+      run: |
+        cmake -S . -A ${{matrix.arch}} ${{matrix.toolset}} -DBUILD_SHARED_LIBS=${{matrix.shared}} -DSTREAMVBYTE_ENABLE_EXAMPLES=ON -DSTREAMVBYTE_ENABLE_TESTS=ON -DSTREAMVBYTE_WALL=ON -DSTREAMVBYTE_WERROR=ON -B build
+    - name: Build Debug
+      run: cmake --build build --config Debug --verbose
+    - name: Build Release
+      run: cmake --build build --config Release --verbose
+    - name: Run Release tests
+      run: |
+        cd build
+        ctest -C Release --output-on-failure
+    - name: Run Debug tests
+      run: |
+        cd build
+        ctest -C Debug --output-on-failure
