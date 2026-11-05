@@ -36,7 +36,8 @@ static inline size_t streamvbyte_encode4(uint32x4_t data, uint8_t *__restrict__ 
 
   // shuffle in 8-byte chunks
   uint8x16_t databytes = vreinterpretq_u8_u32(data);
-  uint8x16_t encodingShuffle = vld1q_u8((uint8_t *) &encodingShuffleTable[code]);
+  const uint8_t (*lut)[16] = (const uint8_t (*)[16])shuf_lut;
+  uint8x16_t encodingShuffle = vld1q_u8(lut[code & 0x3F]);
 #ifdef STREAMVBYTE_IS_ARM64
   vst1q_u8(outData, vqtbl1q_u8(databytes, encodingShuffle));
 #else
