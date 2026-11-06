@@ -1,6 +1,11 @@
 #include "streamvbyte_isadetection.h"
 #include <string.h>
 
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdeclaration-after-statement"
+#pragma clang diagnostic ignored "-Wcast-align"
+#endif
+
 #if defined(STREAMVBYTE_IS_ARM64)
 
 static inline uint32x4_t svb_write_neon_d1(uint32_t *out, uint32x4_t curr,
