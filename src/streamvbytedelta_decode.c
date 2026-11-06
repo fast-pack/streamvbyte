@@ -83,7 +83,8 @@ size_t streamvbyte_delta_decode(const uint8_t *in, uint32_t *out,
         size_t)(svb_decode_sse41_d1_init(out, keyPtr, dataPtr, count, prev) -
                 in);
   }
-#elif defined(STREAMVBYTE_IS_ARM64)
+#endif
+#if defined(STREAMVBYTE_IS_ARM64)
   return (size_t)(svb_decode_neon_d1_init(out, keyPtr, dataPtr, count, prev) -
                   in);
 #else

@@ -3191,7 +3191,7 @@ fail:
 static int test_delta_decode_neon(void) {
   uint32_t counts[128];
   size_t num_counts = 0;
-  for (uint32_t c = 1; c <= 65; c++) {
+  for (uint32_t c = 0; c <= 65; c++) {
     counts[num_counts++] = c;
   }
   const uint32_t extra_counts[] = {70,  95,  96,  97,  100,  127, 128,
