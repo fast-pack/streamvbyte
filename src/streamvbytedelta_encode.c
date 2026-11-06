@@ -1,5 +1,5 @@
-#include "streamvbytedelta.h"
 #include "streamvbyte_isadetection.h"
+#include "streamvbytedelta.h"
 
 #include "streamvbyte_endian.h"
 #include <string.h> // for memcpy
@@ -12,7 +12,8 @@
 #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
 #endif
 
-static uint8_t svb_encode_data(uint32_t val, uint8_t *__restrict__ *dataPtrPtr) {
+static uint8_t svb_encode_data(uint32_t val,
+                               uint8_t *__restrict__ *dataPtrPtr) {
   uint8_t *dataPtr = *dataPtrPtr;
   uint8_t code;
 
@@ -63,15 +64,25 @@ static uint8_t *svb_encode_scalar_d1_init(const uint32_t *in,
   return dataPtr; // pointer to first unused data byte
 }
 
-size_t streamvbyte_delta_encode(const uint32_t *in, uint32_t count, uint8_t *out,
-                                uint32_t prev) {
+#if defined(STREAMVBYTE_IS_ARM64)
+#include "streamvbyte_arm_encode.c"
+#include "streamvbytedelta_arm_encode.c"
+#endif
+
+size_t streamvbyte_delta_encode(const uint32_t *in, uint32_t count,
+                                uint8_t *out, uint32_t prev) {
 #ifdef STREAMVBYTE_X64
-  if(streamvbyte_sse41()) {
-    return streamvbyte_encode_SSE41_d1_init(in,count,out,prev);
+  if (streamvbyte_sse41()) {
+    return streamvbyte_encode_SSE41_d1_init(in, count, out, prev);
   }
 #endif
+#if defined(STREAMVBYTE_IS_ARM64)
+  return streamvbyte_encode_neon_d1_init(in, count, out, prev);
+#else
   uint8_t *keyPtr = out;             // keys come immediately after 32-bit count
   uint32_t keyLen = (count + 3) / 4; // 2-bits rounded to full byte
   uint8_t *dataPtr = keyPtr + keyLen; // variable byte data after all keys
-  return (size_t)(svb_encode_scalar_d1_init(in, keyPtr, dataPtr, count, prev) - out);
+  return (size_t)(svb_encode_scalar_d1_init(in, keyPtr, dataPtr, count, prev) -
+                  out);
+#endif
 }
