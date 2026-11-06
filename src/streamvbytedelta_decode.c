@@ -61,14 +61,6 @@ static const uint8_t *svb_decode_scalar_d1_init(uint32_t *outPtr,
 #endif
 
 #if defined(STREAMVBYTE_IS_ARM64)
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#endif
-#include "streamvbyte_arm_decode.c"
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
 #include "streamvbytedelta_arm_decode.c"
 #endif
 

@@ -11,8 +11,9 @@ static inline uint32x4_t neon_delta(uint32x4_t curr, uint32x4_t prev) {
   return vsubq_u32(curr, vextq_u32(prev, curr, 3));
 }
 
-size_t streamvbyte_encode_neon_d1_init(const uint32_t *in, uint32_t count,
-                                       uint8_t *out, uint32_t prev) {
+static size_t streamvbyte_encode_neon_d1_init(const uint32_t *in,
+                                              uint32_t count, uint8_t *out,
+                                              uint32_t prev) {
   uint32_t keyLen = (count + 3) / 4;
   uint8_t *__restrict__ keyPtr = out;
   uint8_t *__restrict__ dataPtr = out + keyLen;
