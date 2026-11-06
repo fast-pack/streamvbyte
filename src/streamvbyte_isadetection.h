@@ -43,21 +43,23 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <stdbool.h>
 #include <stdlib.h>
 
-#if defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
+#if (defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)) &&      \
+    !defined(__AARCH64EB__) &&                                                 \
+    (!defined(__BYTE_ORDER__) || (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
 #define STREAMVBYTE_IS_ARM64 1
 #endif // defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
 #if defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
-#if defined(_M_X64) || defined(_M_AMD64) || defined(_M_IX86)
-#include <intrin.h>
-#include <tmmintrin.h>
-#include <smmintrin.h>
-#elif defined(STREAMVBYTE_IS_ARM64)
+#if defined(STREAMVBYTE_IS_ARM64)
 #if defined(__clang__)
 #include <arm_neon.h>
 #else
 #include <arm64_neon.h>
 #endif
+#elif defined(_M_X64) || defined(_M_AMD64) || defined(_M_IX86)
+#include <intrin.h>
+#include <tmmintrin.h>
+#include <smmintrin.h>
 #endif
 #elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 /* GCC-compatible compiler, targeting x86/x86-64 */
@@ -202,7 +204,7 @@ static inline uint32_t dynamic_streamvbyte_detect_supported_architectures(void) 
 #endif // end SIMD extension detection code
 
 
-#if defined(__x86_64__) || defined(_M_AMD64) // x64
+#if (defined(__x86_64__) || defined(_M_AMD64)) && !defined(_M_ARM64EC) // x64
 #define STREAMVBYTE_X64
 #if defined(__cplusplus)
 #include <atomic>

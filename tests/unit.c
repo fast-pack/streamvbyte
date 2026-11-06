@@ -2961,14 +2961,6 @@ static bool issue69(void) {
   return true;
 }
 
-#if defined(STREAMVBYTE_IS_ARM64)
-size_t streamvbyte_encode_neon_d1_init(const uint32_t *in, uint32_t count,
-                                       uint8_t *out, uint32_t prev);
-const uint8_t *svb_decode_neon_d1_init(uint32_t *out, const uint8_t *keyPtr,
-                                       const uint8_t *dataPtr, uint64_t count,
-                                       uint32_t prev);
-#endif
-
 static size_t ref_delta_encode(const uint32_t *in, uint32_t count, uint8_t *out,
                                uint32_t prev) {
   if (count == 0)
@@ -3041,15 +3033,13 @@ static int test_delta_encode_neon(void) {
   uint32_t *raw_in = malloc(in_buf_size);
   uint8_t *raw_out = malloc(out_buf_size);
   uint8_t *raw_ref = malloc(out_buf_size);
-  uint8_t *raw_neon = malloc(out_buf_size);
   uint32_t *raw_recov = malloc(in_buf_size);
 
-  if (!raw_in || !raw_out || !raw_ref || !raw_neon || !raw_recov) {
+  if (!raw_in || !raw_out || !raw_ref || !raw_recov) {
     fprintf(stderr, "[test_delta_encode_neon] allocation failed\n");
     free(raw_in);
     free(raw_out);
     free(raw_ref);
-    free(raw_neon);
     free(raw_recov);
     return -1;
   }
@@ -3095,12 +3085,10 @@ static int test_delta_encode_neon(void) {
             const uint32_t *in = raw_in + in_offset;
             uint8_t *out = raw_out + offset_out;
             uint8_t *ref = raw_ref + offset_out;
-            uint8_t *neon = raw_neon + offset_out;
             uint32_t *recov = raw_recov + in_offset;
 
             memset(raw_out, 0xAA, out_buf_size);
             memset(raw_ref, 0xAA, out_buf_size);
-            memset(raw_neon, 0xAA, out_buf_size);
             memset(raw_recov, 0x55, in_buf_size);
 
             size_t ref_len = ref_delta_encode(in, count, ref, prev);
@@ -3144,28 +3132,6 @@ static int test_delta_encode_neon(void) {
                 }
               }
             }
-
-#if defined(STREAMVBYTE_IS_ARM64)
-            size_t neon_len =
-                streamvbyte_encode_neon_d1_init(in, count, neon, prev);
-            if (neon_len != ref_len) {
-              fprintf(stderr,
-                      "[test_delta_encode_neon] "
-                      "streamvbyte_encode_neon_d1_init length mismatch: "
-                      "neon=%zu ref=%zu (count=%u, pattern=%d, offset_out=%u, "
-                      "in_offset=%u)\n",
-                      neon_len, ref_len, count, pattern, offset_out, in_offset);
-              goto fail;
-            }
-            if (ref_len > 0 && memcmp(neon, ref, ref_len) != 0) {
-              fprintf(stderr,
-                      "[test_delta_encode_neon] "
-                      "streamvbyte_encode_neon_d1_init content mismatch "
-                      "(count=%u, pattern=%d, offset_out=%u, in_offset=%u)\n",
-                      count, pattern, offset_out, in_offset);
-              goto fail;
-            }
-#endif
           }
         }
       }
@@ -3175,7 +3141,6 @@ static int test_delta_encode_neon(void) {
   free(raw_in);
   free(raw_out);
   free(raw_ref);
-  free(raw_neon);
   free(raw_recov);
   return 0;
 
@@ -3183,7 +3148,6 @@ fail:
   free(raw_in);
   free(raw_out);
   free(raw_ref);
-  free(raw_neon);
   free(raw_recov);
   return -1;
 }
@@ -3224,14 +3188,12 @@ static int test_delta_decode_neon(void) {
   uint32_t *raw_in = malloc(in_buf_size);
   uint8_t *raw_comp = malloc(comp_buf_size);
   uint32_t *raw_out = malloc(out_buf_size);
-  uint32_t *raw_neon = malloc(out_buf_size);
 
-  if (!raw_in || !raw_comp || !raw_out || !raw_neon) {
+  if (!raw_in || !raw_comp || !raw_out) {
     fprintf(stderr, "[test_delta_decode_neon] allocation failed\n");
     free(raw_in);
     free(raw_comp);
     free(raw_out);
-    free(raw_neon);
     return -1;
   }
 
@@ -3330,60 +3292,6 @@ static int test_delta_decode_neon(void) {
                 goto fail;
               }
             }
-
-#if defined(STREAMVBYTE_IS_ARM64)
-            // Test 2: direct svb_decode_neon_d1_init call
-            for (size_t k = 0; k < canary_len + max_count + canary_len; k++) {
-              raw_neon[k] = canary_val;
-            }
-            uint32_t *out_neon = raw_neon + canary_len;
-
-            uint32_t keyLen = (count + 3) / 4;
-            const uint8_t *keyPtr = comp;
-            const uint8_t *dataPtr = comp + keyLen;
-
-            const uint8_t *neon_end = svb_decode_neon_d1_init(
-                out_neon, keyPtr, dataPtr, count, prev);
-            size_t neon_dec_bytes = (size_t)(neon_end - comp);
-            if (neon_dec_bytes != comp_len) {
-              fprintf(stderr,
-                      "[test_delta_decode_neon] svb_decode_neon_d1_init length "
-                      "mismatch: dec=%zu comp=%zu (count=%u, pattern=%d)\n",
-                      neon_dec_bytes, comp_len, count, pattern);
-              goto fail;
-            }
-
-            for (uint32_t k = 0; k < canary_len; k++) {
-              if (raw_neon[k] != canary_val) {
-                fprintf(stderr,
-                        "[test_delta_decode_neon] svb_decode_neon_d1_init "
-                        "before canary clobbered at %u: 0x%08X (count=%u)\n",
-                        k, raw_neon[k], count);
-                goto fail;
-              }
-            }
-
-            for (uint32_t k = 0; k < count; k++) {
-              if (out_neon[k] != in[k]) {
-                fprintf(stderr,
-                        "[test_delta_decode_neon] svb_decode_neon_d1_init "
-                        "value mismatch at %u: out=%u in=%u (count=%u, "
-                        "pattern=%d)\n",
-                        k, out_neon[k], in[k], count, pattern);
-                goto fail;
-              }
-            }
-
-            for (uint32_t k = 0; k < canary_len; k++) {
-              if (out_neon[count + k] != canary_val) {
-                fprintf(stderr,
-                        "[test_delta_decode_neon] svb_decode_neon_d1_init "
-                        "after canary clobbered at %u: 0x%08X (count=%u)\n",
-                        k, out_neon[count + k], count);
-                goto fail;
-              }
-            }
-#endif
           }
         }
       }
@@ -3393,14 +3301,12 @@ static int test_delta_decode_neon(void) {
   free(raw_in);
   free(raw_comp);
   free(raw_out);
-  free(raw_neon);
   return 0;
 
 fail:
   free(raw_in);
   free(raw_comp);
   free(raw_out);
-  free(raw_neon);
   return -1;
 }
 
@@ -3432,14 +3338,12 @@ static int test_delta_decode_zero_keys(void) {
   uint32_t *raw_in = malloc(in_buf_size);
   uint8_t *raw_comp = malloc(comp_buf_size);
   uint32_t *raw_out = malloc(out_buf_size);
-  uint32_t *raw_neon = malloc(out_buf_size);
 
-  if (!raw_in || !raw_comp || !raw_out || !raw_neon) {
+  if (!raw_in || !raw_comp || !raw_out) {
     fprintf(stderr, "[test_delta_decode_zero_keys] allocation failed\n");
     free(raw_in);
     free(raw_comp);
     free(raw_out);
-    free(raw_neon);
     return -1;
   }
 
@@ -3537,61 +3441,6 @@ static int test_delta_decode_zero_keys(void) {
                 goto fail;
               }
             }
-
-#if defined(STREAMVBYTE_IS_ARM64)
-            // Test 2: direct svb_decode_neon_d1_init call
-            for (size_t k = 0; k < canary_len + max_count + canary_len; k++) {
-              raw_neon[k] = canary_val;
-            }
-            uint32_t *out_neon = raw_neon + canary_len;
-
-            uint32_t keyLen = (count + 3) / 4;
-            const uint8_t *keyPtr = comp;
-            const uint8_t *dataPtr = comp + keyLen;
-
-            const uint8_t *neon_end =
-                svb_decode_neon_d1_init(out_neon, keyPtr, dataPtr, count, prev);
-            size_t neon_dec_bytes = (size_t)(neon_end - comp);
-            if (neon_dec_bytes != comp_len) {
-              fprintf(
-                  stderr,
-                  "[test_delta_decode_zero_keys] svb_decode_neon_d1_init "
-                  "length mismatch: dec=%zu comp=%zu (count=%u, pattern=%d)\n",
-                  neon_dec_bytes, comp_len, count, pattern);
-              goto fail;
-            }
-
-            for (uint32_t k = 0; k < canary_len; k++) {
-              if (raw_neon[k] != canary_val) {
-                fprintf(stderr,
-                        "[test_delta_decode_zero_keys] svb_decode_neon_d1_init "
-                        "before canary clobbered at %u: 0x%08X (count=%u)\n",
-                        k, raw_neon[k], count);
-                goto fail;
-              }
-            }
-
-            for (uint32_t k = 0; k < count; k++) {
-              if (out_neon[k] != in[k]) {
-                fprintf(stderr,
-                        "[test_delta_decode_zero_keys] svb_decode_neon_d1_init "
-                        "value mismatch at %u: out=%u in=%u (count=%u, "
-                        "pattern=%d)\n",
-                        k, out_neon[k], in[k], count, pattern);
-                goto fail;
-              }
-            }
-
-            for (uint32_t k = 0; k < canary_len; k++) {
-              if (out_neon[count + k] != canary_val) {
-                fprintf(stderr,
-                        "[test_delta_decode_zero_keys] svb_decode_neon_d1_init "
-                        "after canary clobbered at %u: 0x%08X (count=%u)\n",
-                        k, out_neon[count + k], count);
-                goto fail;
-              }
-            }
-#endif
           }
         }
       }
@@ -3601,14 +3450,12 @@ static int test_delta_decode_zero_keys(void) {
   free(raw_in);
   free(raw_comp);
   free(raw_out);
-  free(raw_neon);
   return 0;
 
 fail:
   free(raw_in);
   free(raw_comp);
   free(raw_out);
-  free(raw_neon);
   return -1;
 }
 
@@ -3762,46 +3609,6 @@ static int all256keys_deltatest(void) {
               return -1;
             }
           }
-
-#if defined(STREAMVBYTE_IS_ARM64)
-          for (size_t di = 0; di < sizeof(raw_decoded) / sizeof(raw_decoded[0]);
-               ++di) {
-            raw_decoded[di] = dec_canary_val;
-          }
-          const uint8_t *neon_end = svb_decode_neon_d1_init(
-              decoded, compressed, compressed + key_bytes, count, prev);
-          size_t neon_used = (size_t)(neon_end - compressed);
-          if (neon_used != compsize) {
-            printf("[all256keys_deltatest] svb_decode_neon_d1_init usedbytes "
-                   "mismatch: %zu != %zu\n",
-                   neon_used, compsize);
-            return -1;
-          }
-          for (uint32_t lane = 0; lane < count; ++lane) {
-            if (decoded[lane] != in[lane]) {
-              printf("[all256keys_deltatest] svb_decode_neon_d1_init lane=%u "
-                     "mismatch\n",
-                     lane);
-              return -1;
-            }
-          }
-          for (size_t bi = 0; bi < DELTA_CANARY_LEN; ++bi) {
-            if (raw_decoded[bi] != dec_canary_val) {
-              printf("[all256keys_deltatest] svb_decode_neon_d1_init before "
-                     "canary clobbered at %zu\n",
-                     bi);
-              return -1;
-            }
-          }
-          for (size_t ai = 0; ai < DELTA_CANARY_LEN; ++ai) {
-            if (decoded[count + ai] != dec_canary_val) {
-              printf("[all256keys_deltatest] svb_decode_neon_d1_init after "
-                     "canary clobbered at %u\n",
-                     count + (uint32_t)ai);
-              return -1;
-            }
-          }
-#endif
         }
       }
     }
@@ -3925,55 +3732,49 @@ static int all256keys_deltatest(void) {
     }
   }
 
-#if defined(STREAMVBYTE_IS_ARM64)
-  for (size_t di = 0; di < stream_canary_len + total_ints + stream_canary_len;
-       ++di) {
-    raw_stream_out[di] = dec_canary_val;
-  }
-  const uint8_t *stream_neon_end = svb_decode_neon_d1_init(
-      stream_out, stream_comp, stream_comp + total_quads, total_ints,
-      prev_multi);
-  size_t stream_neon_used = (size_t)(stream_neon_end - stream_comp);
-  if (stream_neon_used != total_comp ||
-      memcmp(stream_in, stream_out, total_ints * sizeof(uint32_t)) != 0) {
-    printf("[all256keys_deltatest] multi-quad svb_decode_neon_d1_init "
-           "mismatch\n");
-    free(stream_in);
-    free(stream_comp);
-    free(raw_stream_out);
-    free(ref_stream_comp);
-    return -1;
-  }
-  for (uint32_t bi = 0; bi < stream_canary_len; ++bi) {
-    if (raw_stream_out[bi] != dec_canary_val) {
-      printf("[all256keys_deltatest] multi-quad svb_decode_neon_d1_init before "
-             "canary clobbered at %u\n",
-             bi);
-      free(stream_in);
-      free(stream_comp);
-      free(raw_stream_out);
-      free(ref_stream_comp);
-      return -1;
-    }
-  }
-  for (uint32_t ai = 0; ai < stream_canary_len; ++ai) {
-    if (stream_out[total_ints + ai] != dec_canary_val) {
-      printf("[all256keys_deltatest] multi-quad svb_decode_neon_d1_init after "
-             "canary clobbered at lane %u\n",
-             total_ints + ai);
-      free(stream_in);
-      free(stream_comp);
-      free(raw_stream_out);
-      free(ref_stream_comp);
-      return -1;
-    }
-  }
-#endif
-
   free(stream_in);
   free(stream_comp);
   free(raw_stream_out);
   free(ref_stream_comp);
+
+  // Part 3: Test all 16 byte alignment offsets (0..15) and exact
+  // STREAMVBYTE_PADDING-bounded heap allocations.
+  for (size_t align_off = 0; align_off < 16; ++align_off) {
+    const uint32_t p3_counts[] = {32, 33, 35, 36, 64};
+    for (size_t ci = 0; ci < sizeof(p3_counts) / sizeof(p3_counts[0]); ++ci) {
+      uint32_t cnt = p3_counts[ci];
+      uint32_t p3_in[64];
+      uint32_t p3_running = 100;
+      for (uint32_t i = 0; i < cnt; ++i) {
+        p3_running += sample_vals[i & 3];
+        p3_in[i] = p3_running;
+      }
+      uint8_t tmp_comp[512];
+      size_t exact_comp = streamvbyte_delta_encode(p3_in, cnt, tmp_comp, 100);
+      uint8_t *exact_buf = malloc(align_off + exact_comp + STREAMVBYTE_PADDING);
+      uint32_t *exact_out = malloc(cnt * sizeof(uint32_t));
+      if (!exact_buf || !exact_out) {
+        free(exact_buf);
+        free(exact_out);
+        return -1;
+      }
+      memcpy(exact_buf + align_off, tmp_comp, exact_comp);
+      memset(exact_buf + align_off + exact_comp, 0, STREAMVBYTE_PADDING);
+      size_t dec_used =
+          streamvbyte_delta_decode(exact_buf + align_off, exact_out, cnt, 100);
+      if (dec_used != exact_comp ||
+          memcmp(p3_in, exact_out, cnt * sizeof(uint32_t)) != 0) {
+        printf("[all256keys_deltatest] Part 3 exact-padded decode mismatch at "
+               "align_off=%zu cnt=%u\n",
+               align_off, cnt);
+        free(exact_buf);
+        free(exact_out);
+        return -1;
+      }
+      free(exact_buf);
+      free(exact_out);
+    }
+  }
   return 0;
 }
 

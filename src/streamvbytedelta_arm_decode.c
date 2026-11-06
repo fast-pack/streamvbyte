@@ -7,6 +7,23 @@
 #endif
 
 #if defined(STREAMVBYTE_IS_ARM64)
+#include "streamvbyte_shuffle_tables_decode.h"
+
+static inline uint8x16_t _decode_neon(const uint8_t key,
+                                      const uint8_t *__restrict__ *dataPtrPtr) {
+  uint8_t len;
+  const uint8_t *pshuf = (const uint8_t *)&shuffleTable[key];
+  uint8x16_t decodingShuffle = vld1q_u8(pshuf);
+  uint8x16_t compressed = vld1q_u8(*dataPtrPtr);
+#ifdef AVOIDLENGTHLOOKUP
+  len = pshuf[12 + (key >> 6)] + 1;
+#else
+  len = lengthTable[key];
+#endif
+  uint8x16_t data = vqtbl1q_u8(compressed, decodingShuffle);
+  *dataPtrPtr += len;
+  return data;
+}
 
 static inline uint32x4_t svb_write_neon_d1(uint32_t *out, uint32x4_t curr,
                                            uint32x4_t prev, uint32x4_t zero) {
@@ -37,11 +54,11 @@ static inline uint32x4_t svb_write_16bit_neon_d1(uint32_t *out,
   return v2;
 }
 
-const uint8_t *svb_decode_neon_d1_init(uint32_t *out,
-                                       const uint8_t *__restrict__ keyPtr,
-                                       const uint8_t *__restrict__ dataPtr,
-                                       uint64_t count, uint32_t prev) {
-  uint64_t keybytes = count / 4;
+static const uint8_t *
+svb_decode_neon_d1_init(uint32_t *out, const uint8_t *__restrict__ keyPtr,
+                        const uint8_t *__restrict__ dataPtr, uint32_t count,
+                        uint32_t prev) {
+  uint32_t keybytes = count / 4;
   if (keybytes >= 8) {
     uint32x4_t Prev = vdupq_n_u32(prev);
     const uint32x4_t zero = vdupq_n_u32(0);
@@ -105,7 +122,7 @@ const uint8_t *svb_decode_neon_d1_init(uint32_t *out,
     prev = out[-1];
   }
 
-  uint64_t consumedkeys = keybytes - (keybytes & 7);
+  uint32_t consumedkeys = keybytes - (keybytes & 7);
   return svb_decode_scalar_d1_init(out, keyPtr + consumedkeys, dataPtr,
                                    count & 31, prev);
 }
