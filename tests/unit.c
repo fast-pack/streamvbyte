@@ -2961,8 +2961,236 @@ static bool issue69(void) {
   return true;
 }
 
+#if defined(STREAMVBYTE_IS_ARM64)
+size_t streamvbyte_encode_neon_d1_init(const uint32_t *in, uint32_t count,
+                                       uint8_t *out, uint32_t prev);
+#endif
+
+static size_t ref_delta_encode(const uint32_t *in, uint32_t count, uint8_t *out,
+                               uint32_t prev) {
+  if (count == 0)
+    return 0;
+  uint32_t keyLen = (count + 3) / 4;
+  uint8_t *keyPtr = out;
+  uint8_t *dataPtr = out + keyLen;
+  memset(keyPtr, 0, keyLen);
+
+  uint8_t shift = 0;
+  uint8_t key = 0;
+  for (uint32_t i = 0; i < count; i++) {
+    if (shift == 8) {
+      shift = 0;
+      *keyPtr++ = key;
+      key = 0;
+    }
+    uint32_t val = in[i] - prev;
+    prev = in[i];
+    uint8_t code;
+    if (val < (1U << 8)) {
+      *dataPtr++ = (uint8_t)val;
+      code = 0;
+    } else if (val < (1U << 16)) {
+      dataPtr[0] = (uint8_t)(val & 0xFF);
+      dataPtr[1] = (uint8_t)((val >> 8) & 0xFF);
+      dataPtr += 2;
+      code = 1;
+    } else if (val < (1U << 24)) {
+      dataPtr[0] = (uint8_t)(val & 0xFF);
+      dataPtr[1] = (uint8_t)((val >> 8) & 0xFF);
+      dataPtr[2] = (uint8_t)((val >> 16) & 0xFF);
+      dataPtr += 3;
+      code = 2;
+    } else {
+      dataPtr[0] = (uint8_t)(val & 0xFF);
+      dataPtr[1] = (uint8_t)((val >> 8) & 0xFF);
+      dataPtr[2] = (uint8_t)((val >> 16) & 0xFF);
+      dataPtr[3] = (uint8_t)((val >> 24) & 0xFF);
+      dataPtr += 4;
+      code = 3;
+    }
+    key |= (uint8_t)(code << shift);
+    shift += 2;
+  }
+  *keyPtr = key;
+  return (size_t)(dataPtr - out);
+}
+
+static int test_delta_encode_neon(void) {
+  const uint32_t counts[] = {0,  1,  4,  7,  8,   9,   15,
+                             16, 31, 32, 33, 100, 1024};
+  const size_t num_counts = sizeof(counts) / sizeof(counts[0]);
+  const uint32_t max_count = 1024;
+
+  const uint32_t deltas[] = {
+      1,        5,         200,        // 1-byte deltas
+      256,      1000,      65000,      // 2-byte deltas
+      65536,    100000,    16000000,   // 3-byte deltas
+      16777216, 100000000, 0x12345678U // 4-byte deltas
+  };
+  const size_t num_deltas = sizeof(deltas) / sizeof(deltas[0]);
+
+  const uint32_t prev_values[] = {0, 42, 0xDEADBEEFU};
+  const size_t num_prev = sizeof(prev_values) / sizeof(prev_values[0]);
+
+  size_t in_buf_size = (max_count + 16) * sizeof(uint32_t);
+  size_t out_buf_size = streamvbyte_max_compressedbytes(max_count) + 64;
+
+  uint32_t *raw_in = malloc(in_buf_size);
+  uint8_t *raw_out = malloc(out_buf_size);
+  uint8_t *raw_ref = malloc(out_buf_size);
+  uint8_t *raw_neon = malloc(out_buf_size);
+  uint32_t *raw_recov = malloc(in_buf_size);
+
+  if (!raw_in || !raw_out || !raw_ref || !raw_neon || !raw_recov) {
+    fprintf(stderr, "[test_delta_encode_neon] allocation failed\n");
+    free(raw_in);
+    free(raw_out);
+    free(raw_ref);
+    free(raw_neon);
+    free(raw_recov);
+    return -1;
+  }
+
+  for (int pattern = -1; pattern < (int)num_deltas; pattern++) {
+    for (size_t p = 0; p < num_prev; p++) {
+      uint32_t prev = prev_values[p];
+
+      uint32_t running = prev;
+      for (uint32_t i = 0; i < max_count + 16; i++) {
+        uint32_t d;
+        if (pattern == -1) {
+          uint32_t r = (uint32_t)rand();
+          switch (i % 4) {
+          case 0:
+            d = (r % 255) + 1;
+            break;
+          case 1:
+            d = ((r % 65280) + 256);
+            break;
+          case 2:
+            d = ((r % 16711680) + 65536);
+            break;
+          default:
+            d = (r | 0x10000000U);
+            break;
+          }
+        } else {
+          d = deltas[pattern];
+        }
+        running += d;
+        raw_in[i] = running;
+      }
+
+      for (size_t ci = 0; ci < num_counts; ci++) {
+        uint32_t count = counts[ci];
+
+        for (uint32_t offset_out = 0; offset_out < 8; offset_out++) {
+          for (uint32_t in_offset = 0; in_offset < 8; in_offset++) {
+            if (count + in_offset > max_count + 16)
+              continue;
+
+            const uint32_t *in = raw_in + in_offset;
+            uint8_t *out = raw_out + offset_out;
+            uint8_t *ref = raw_ref + offset_out;
+            uint8_t *neon = raw_neon + offset_out;
+            uint32_t *recov = raw_recov + in_offset;
+
+            memset(raw_out, 0xAA, out_buf_size);
+            memset(raw_ref, 0xAA, out_buf_size);
+            memset(raw_neon, 0xAA, out_buf_size);
+            memset(raw_recov, 0x55, in_buf_size);
+
+            size_t ref_len = ref_delta_encode(in, count, ref, prev);
+            size_t act_len = streamvbyte_delta_encode(in, count, out, prev);
+
+            if (act_len != ref_len) {
+              fprintf(stderr,
+                      "[test_delta_encode_neon] streamvbyte_delta_encode length "
+                      "mismatch: act=%zu ref=%zu (count=%u, pattern=%d, "
+                      "offset_out=%u, in_offset=%u)\n",
+                      act_len, ref_len, count, pattern, offset_out, in_offset);
+              goto fail;
+            }
+
+            if (ref_len > 0 && memcmp(out, ref, ref_len) != 0) {
+              fprintf(stderr,
+                      "[test_delta_encode_neon] streamvbyte_delta_encode "
+                      "content mismatch (count=%u, pattern=%d, offset_out=%u, "
+                      "in_offset=%u)\n",
+                      count, pattern, offset_out, in_offset);
+              goto fail;
+            }
+
+            if (count > 0) {
+              size_t dec_bytes =
+                  streamvbyte_delta_decode(out, recov, count, prev);
+              if (dec_bytes != act_len) {
+                fprintf(stderr,
+                        "[test_delta_encode_neon] decode length mismatch: "
+                        "dec=%zu act=%zu (count=%u)\n",
+                        dec_bytes, act_len, count);
+                goto fail;
+              }
+              for (uint32_t k = 0; k < count; k++) {
+                if (recov[k] != in[k]) {
+                  fprintf(stderr,
+                          "[test_delta_encode_neon] decode value mismatch at "
+                          "%u: recov=%u in=%u (count=%u)\n",
+                          k, recov[k], in[k], count);
+                  goto fail;
+                }
+              }
+            }
+
+#if defined(STREAMVBYTE_IS_ARM64)
+            size_t neon_len =
+                streamvbyte_encode_neon_d1_init(in, count, neon, prev);
+            if (neon_len != ref_len) {
+              fprintf(stderr,
+                      "[test_delta_encode_neon] "
+                      "streamvbyte_encode_neon_d1_init length mismatch: "
+                      "neon=%zu ref=%zu (count=%u, pattern=%d, offset_out=%u, "
+                      "in_offset=%u)\n",
+                      neon_len, ref_len, count, pattern, offset_out, in_offset);
+              goto fail;
+            }
+            if (ref_len > 0 && memcmp(neon, ref, ref_len) != 0) {
+              fprintf(stderr,
+                      "[test_delta_encode_neon] "
+                      "streamvbyte_encode_neon_d1_init content mismatch "
+                      "(count=%u, pattern=%d, offset_out=%u, in_offset=%u)\n",
+                      count, pattern, offset_out, in_offset);
+              goto fail;
+            }
+#endif
+          }
+        }
+      }
+    }
+  }
+
+  free(raw_in);
+  free(raw_out);
+  free(raw_ref);
+  free(raw_neon);
+  free(raw_recov);
+  return 0;
+
+fail:
+  free(raw_in);
+  free(raw_out);
+  free(raw_ref);
+  free(raw_neon);
+  free(raw_recov);
+  return -1;
+}
+
 int main(void) {
   if (!unpaddedtests()) { printf("tests failed.\n"); return EXIT_FAILURE; }
+  if (test_delta_encode_neon() == -1) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
   if (!issue42()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (!issue69()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (zigzagtests() == -1) { printf("tests failed.\n"); return EXIT_FAILURE; }
