@@ -1,5 +1,10 @@
 #include "streamvbyte_isadetection.h"
 
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdeclaration-after-statement"
+#pragma clang diagnostic ignored "-Wcast-align"
+#endif
+
 #if defined(STREAMVBYTE_IS_ARM64)
 
 static inline uint32x4_t neon_delta(uint32x4_t curr, uint32x4_t prev) {

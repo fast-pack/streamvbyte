@@ -3612,6 +3612,371 @@ fail:
   return -1;
 }
 
+static int all256keys_deltatest(void) {
+  // Representative values with distinct non-zero bytes for codes 0, 1, 2, 3
+  // (lengths 1, 2, 3, 4 bytes)
+  const uint32_t sample_vals[4] = {
+      0x0000005AU, // code 0: 1 byte  (5A)
+      0x00001234U, // code 1: 2 bytes (34 12)
+      0x00456789U, // code 2: 3 bytes (89 67 45)
+      0x89ABCDEFU  // code 3: 4 bytes (EF CD AB 89)
+  };
+  const uint32_t tail_counts[] = {4, 5, 6, 7, 8, 9, 31, 32, 33, 35};
+  const size_t num_tail_counts = sizeof(tail_counts) / sizeof(tail_counts[0]);
+  const uint32_t prev_values[] = {0, 42, 0x87654321U};
+  const size_t num_prev = sizeof(prev_values) / sizeof(prev_values[0]);
+
+  enum { DELTA_CANARY_LEN = 32, DELTA_MAX_COUNT = 35 };
+  const uint32_t dec_canary_val = 0xDEADBEEFU;
+  const uint8_t comp_canary_byte = 0xCC;
+
+  uint8_t raw_compressed[DELTA_CANARY_LEN + 256 + DELTA_CANARY_LEN];
+  uint8_t raw_ref[DELTA_CANARY_LEN + 256 + DELTA_CANARY_LEN];
+  uint32_t raw_decoded[DELTA_CANARY_LEN + DELTA_MAX_COUNT + DELTA_CANARY_LEN];
+
+  // Part 1: Verify differential encoding and decoding across all 256 control
+  // key configurations (0x00..0xFF) across tail counts and unaligned buffer
+  // offsets (0..3).
+  for (size_t offset = 0; offset < 4; ++offset) {
+    for (size_t ci = 0; ci < num_tail_counts; ++ci) {
+      uint32_t count = tail_counts[ci];
+      for (size_t pi = 0; pi < num_prev; ++pi) {
+        uint32_t prev = prev_values[pi];
+        for (uint32_t key = 0; key < 256; ++key) {
+          uint32_t in[DELTA_MAX_COUNT];
+          uint8_t expected_bytes[DELTA_MAX_COUNT * 4];
+          size_t expected_data_len = 0;
+          size_t key_bytes = (count + 3) / 4;
+          uint8_t expected_keys[16];
+          memset(expected_keys, 0, sizeof(expected_keys));
+
+          uint32_t running = prev;
+          for (uint32_t lane = 0; lane < count; ++lane) {
+            uint32_t code = (lane < 4) ? ((key >> (2 * lane)) & 0x3U)
+                                       : ((key + lane) & 0x3U);
+            uint32_t delta = sample_vals[code];
+            running += delta;
+            in[lane] = running;
+            expected_keys[lane / 4] |= (uint8_t)(code << (2 * (lane % 4)));
+            uint32_t len = code + 1;
+            for (uint32_t b = 0; b < len; ++b) {
+              expected_bytes[expected_data_len++] =
+                  (uint8_t)((delta >> (8 * b)) & 0xFFU);
+            }
+          }
+
+          uint8_t expected_compressed[256];
+          memcpy(expected_compressed, expected_keys, key_bytes);
+          memcpy(expected_compressed + key_bytes, expected_bytes,
+                 expected_data_len);
+          size_t expected_compsize = key_bytes + expected_data_len;
+
+          memset(raw_compressed, comp_canary_byte, sizeof(raw_compressed));
+          uint8_t *compressed = raw_compressed + DELTA_CANARY_LEN + offset;
+
+          for (size_t di = 0; di < sizeof(raw_decoded) / sizeof(raw_decoded[0]);
+               ++di) {
+            raw_decoded[di] = dec_canary_val;
+          }
+          uint32_t *decoded = raw_decoded + DELTA_CANARY_LEN;
+
+          size_t compsize =
+              streamvbyte_delta_encode(in, count, compressed, prev);
+          if (compsize != expected_compsize) {
+            printf("[all256keys_deltatest] key=0x%02x count=%u compsize=%zu != "
+                   "expected=%zu\n",
+                   (unsigned)key, count, compsize, expected_compsize);
+            return -1;
+          }
+          if (memcmp(compressed, expected_compressed, compsize) != 0) {
+            printf("[all256keys_deltatest] key=0x%02x count=%u compressed "
+                   "bytes mismatch\n",
+                   (unsigned)key, count);
+            return -1;
+          }
+
+          memset(raw_ref, comp_canary_byte, sizeof(raw_ref));
+          uint8_t *ref_out = raw_ref + DELTA_CANARY_LEN + offset;
+          size_t ref_size = ref_delta_encode(in, count, ref_out, prev);
+          if (ref_size != compsize ||
+              memcmp(compressed, ref_out, compsize) != 0) {
+            printf("[all256keys_deltatest] key=0x%02x count=%u scalar encode "
+                   "mismatch\n",
+                   (unsigned)key, count);
+            return -1;
+          }
+
+          for (size_t bi = 0; bi < DELTA_CANARY_LEN + offset; ++bi) {
+            if (raw_compressed[bi] != comp_canary_byte) {
+              printf("[all256keys_deltatest] key=0x%02x count=%u compressed "
+                     "before canary clobbered at %zu: 0x%02x\n",
+                     (unsigned)key, count, bi, raw_compressed[bi]);
+              return -1;
+            }
+          }
+
+          size_t max_allowed_write = streamvbyte_max_compressedbytes(count);
+          for (size_t ai = DELTA_CANARY_LEN + offset + max_allowed_write;
+               ai < sizeof(raw_compressed); ++ai) {
+            if (raw_compressed[ai] != comp_canary_byte) {
+              printf("[all256keys_deltatest] key=0x%02x count=%u compressed "
+                     "after canary clobbered at %zu: 0x%02x\n",
+                     (unsigned)key, count, ai, raw_compressed[ai]);
+              return -1;
+            }
+          }
+
+          size_t usedbytes =
+              streamvbyte_delta_decode(compressed, decoded, count, prev);
+          if (usedbytes != compsize) {
+            printf("[all256keys_deltatest] key=0x%02x count=%u usedbytes=%zu "
+                   "!= compsize=%zu\n",
+                   (unsigned)key, count, usedbytes, compsize);
+            return -1;
+          }
+
+          for (uint32_t lane = 0; lane < count; ++lane) {
+            if (decoded[lane] != in[lane]) {
+              printf("[all256keys_deltatest] key=0x%02x count=%u lane=%u "
+                     "decode mismatch: decoded=%u in=%u\n",
+                     (unsigned)key, count, lane, decoded[lane], in[lane]);
+              return -1;
+            }
+          }
+
+          for (size_t bi = 0; bi < DELTA_CANARY_LEN; ++bi) {
+            if (raw_decoded[bi] != dec_canary_val) {
+              printf("[all256keys_deltatest] key=0x%02x count=%u decoded "
+                     "before canary clobbered at %zu: 0x%08X\n",
+                     (unsigned)key, count, bi, raw_decoded[bi]);
+              return -1;
+            }
+          }
+
+          for (size_t ai = 0; ai < DELTA_CANARY_LEN; ++ai) {
+            if (decoded[count + ai] != dec_canary_val) {
+              printf("[all256keys_deltatest] key=0x%02x count=%u decoded after "
+                     "canary clobbered at lane %u: 0x%08X\n",
+                     (unsigned)key, count, count + (uint32_t)ai,
+                     decoded[count + ai]);
+              return -1;
+            }
+          }
+
+#if defined(STREAMVBYTE_IS_ARM64)
+          for (size_t di = 0; di < sizeof(raw_decoded) / sizeof(raw_decoded[0]);
+               ++di) {
+            raw_decoded[di] = dec_canary_val;
+          }
+          const uint8_t *neon_end = svb_decode_neon_d1_init(
+              decoded, compressed, compressed + key_bytes, count, prev);
+          size_t neon_used = (size_t)(neon_end - compressed);
+          if (neon_used != compsize) {
+            printf("[all256keys_deltatest] svb_decode_neon_d1_init usedbytes "
+                   "mismatch: %zu != %zu\n",
+                   neon_used, compsize);
+            return -1;
+          }
+          for (uint32_t lane = 0; lane < count; ++lane) {
+            if (decoded[lane] != in[lane]) {
+              printf("[all256keys_deltatest] svb_decode_neon_d1_init lane=%u "
+                     "mismatch\n",
+                     lane);
+              return -1;
+            }
+          }
+          for (size_t bi = 0; bi < DELTA_CANARY_LEN; ++bi) {
+            if (raw_decoded[bi] != dec_canary_val) {
+              printf("[all256keys_deltatest] svb_decode_neon_d1_init before "
+                     "canary clobbered at %zu\n",
+                     bi);
+              return -1;
+            }
+          }
+          for (size_t ai = 0; ai < DELTA_CANARY_LEN; ++ai) {
+            if (decoded[count + ai] != dec_canary_val) {
+              printf("[all256keys_deltatest] svb_decode_neon_d1_init after "
+                     "canary clobbered at %u\n",
+                     count + (uint32_t)ai);
+              return -1;
+            }
+          }
+#endif
+        }
+      }
+    }
+  }
+
+  // Part 2: Multi-quad delta stream with all 256 keys forward and reverse
+  // (512 quads = 2048 integers) to test every transition between quads and
+  // across 32-element batch boundaries.
+  const uint32_t total_quads = 512;
+  const uint32_t total_ints = total_quads * 4;
+  const uint32_t stream_canary_len = 32;
+  const uint32_t prev_multi = 0x87654321U;
+
+  uint32_t *stream_in = malloc(total_ints * sizeof(uint32_t));
+  uint8_t *stream_comp = malloc(streamvbyte_max_compressedbytes(total_ints));
+  uint32_t *raw_stream_out = malloc(
+      (stream_canary_len + total_ints + stream_canary_len) * sizeof(uint32_t));
+  uint8_t *ref_stream_comp =
+      malloc(streamvbyte_max_compressedbytes(total_ints));
+
+  if (!stream_in || !stream_comp || !raw_stream_out || !ref_stream_comp) {
+    free(stream_in);
+    free(stream_comp);
+    free(raw_stream_out);
+    free(ref_stream_comp);
+    return -1;
+  }
+
+  for (size_t di = 0; di < stream_canary_len + total_ints + stream_canary_len;
+       ++di) {
+    raw_stream_out[di] = dec_canary_val;
+  }
+  uint32_t *stream_out = raw_stream_out + stream_canary_len;
+
+  size_t expected_stream_bytes = total_quads; // 512 key bytes
+  uint32_t stream_running = prev_multi;
+  for (uint32_t q = 0; q < total_quads; ++q) {
+    uint32_t key = (q < 256) ? q : (511 - q);
+    for (int lane = 0; lane < 4; ++lane) {
+      uint32_t code = (key >> (2 * lane)) & 0x3U;
+      uint32_t delta = sample_vals[code];
+      stream_running += delta;
+      stream_in[q * 4 + lane] = stream_running;
+      expected_stream_bytes += (code + 1);
+    }
+  }
+
+  size_t total_comp = streamvbyte_delta_encode(stream_in, total_ints,
+                                               stream_comp, prev_multi);
+  if (total_comp != expected_stream_bytes ||
+      !streamvbyte_validate_stream(stream_comp, total_comp, total_ints)) {
+    printf("[all256keys_deltatest] multi-quad encode/validate failed: comp=%zu "
+           "exp=%zu\n",
+           total_comp, expected_stream_bytes);
+    free(stream_in);
+    free(stream_comp);
+    free(raw_stream_out);
+    free(ref_stream_comp);
+    return -1;
+  }
+
+  size_t ref_total_comp =
+      ref_delta_encode(stream_in, total_ints, ref_stream_comp, prev_multi);
+  if (ref_total_comp != total_comp ||
+      memcmp(stream_comp, ref_stream_comp, total_comp) != 0) {
+    printf("[all256keys_deltatest] multi-quad scalar encode mismatch\n");
+    free(stream_in);
+    free(stream_comp);
+    free(raw_stream_out);
+    free(ref_stream_comp);
+    return -1;
+  }
+
+  for (uint32_t q = 0; q < total_quads; ++q) {
+    uint32_t key = (q < 256) ? q : (511 - q);
+    if (stream_comp[q] != (uint8_t)key) {
+      printf("[all256keys_deltatest] multi-quad key mismatch at q=%u\n", q);
+      free(stream_in);
+      free(stream_comp);
+      free(raw_stream_out);
+      free(ref_stream_comp);
+      return -1;
+    }
+  }
+
+  size_t total_used = streamvbyte_delta_decode(stream_comp, stream_out,
+                                               total_ints, prev_multi);
+  if (total_used != total_comp ||
+      memcmp(stream_in, stream_out, total_ints * sizeof(uint32_t)) != 0) {
+    printf("[all256keys_deltatest] multi-quad decode mismatch\n");
+    free(stream_in);
+    free(stream_comp);
+    free(raw_stream_out);
+    free(ref_stream_comp);
+    return -1;
+  }
+
+  for (uint32_t bi = 0; bi < stream_canary_len; ++bi) {
+    if (raw_stream_out[bi] != dec_canary_val) {
+      printf("[all256keys_deltatest] multi-quad before canary clobbered at "
+             "%u: 0x%08X\n",
+             bi, raw_stream_out[bi]);
+      free(stream_in);
+      free(stream_comp);
+      free(raw_stream_out);
+      free(ref_stream_comp);
+      return -1;
+    }
+  }
+
+  for (uint32_t ai = 0; ai < stream_canary_len; ++ai) {
+    if (stream_out[total_ints + ai] != dec_canary_val) {
+      printf("[all256keys_deltatest] multi-quad after canary clobbered at "
+             "lane %u: 0x%08X\n",
+             total_ints + ai, stream_out[total_ints + ai]);
+      free(stream_in);
+      free(stream_comp);
+      free(raw_stream_out);
+      free(ref_stream_comp);
+      return -1;
+    }
+  }
+
+#if defined(STREAMVBYTE_IS_ARM64)
+  for (size_t di = 0; di < stream_canary_len + total_ints + stream_canary_len;
+       ++di) {
+    raw_stream_out[di] = dec_canary_val;
+  }
+  const uint8_t *stream_neon_end = svb_decode_neon_d1_init(
+      stream_out, stream_comp, stream_comp + total_quads, total_ints,
+      prev_multi);
+  size_t stream_neon_used = (size_t)(stream_neon_end - stream_comp);
+  if (stream_neon_used != total_comp ||
+      memcmp(stream_in, stream_out, total_ints * sizeof(uint32_t)) != 0) {
+    printf("[all256keys_deltatest] multi-quad svb_decode_neon_d1_init "
+           "mismatch\n");
+    free(stream_in);
+    free(stream_comp);
+    free(raw_stream_out);
+    free(ref_stream_comp);
+    return -1;
+  }
+  for (uint32_t bi = 0; bi < stream_canary_len; ++bi) {
+    if (raw_stream_out[bi] != dec_canary_val) {
+      printf("[all256keys_deltatest] multi-quad svb_decode_neon_d1_init before "
+             "canary clobbered at %u\n",
+             bi);
+      free(stream_in);
+      free(stream_comp);
+      free(raw_stream_out);
+      free(ref_stream_comp);
+      return -1;
+    }
+  }
+  for (uint32_t ai = 0; ai < stream_canary_len; ++ai) {
+    if (stream_out[total_ints + ai] != dec_canary_val) {
+      printf("[all256keys_deltatest] multi-quad svb_decode_neon_d1_init after "
+             "canary clobbered at lane %u\n",
+             total_ints + ai);
+      free(stream_in);
+      free(stream_comp);
+      free(raw_stream_out);
+      free(ref_stream_comp);
+      return -1;
+    }
+  }
+#endif
+
+  free(stream_in);
+  free(stream_comp);
+  free(raw_stream_out);
+  free(ref_stream_comp);
+  return 0;
+}
+
 int main(void) {
   if (!unpaddedtests()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (test_delta_encode_neon() == -1) {
@@ -3623,6 +3988,10 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (test_delta_decode_zero_keys() == -1) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
+  if (all256keys_deltatest() == -1) {
     printf("tests failed.\n");
     return EXIT_FAILURE;
   }
