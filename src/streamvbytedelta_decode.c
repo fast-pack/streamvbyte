@@ -1,5 +1,5 @@
-#include "streamvbytedelta.h"
 #include "streamvbyte_isadetection.h"
+#include "streamvbytedelta.h"
 
 #include "streamvbyte_endian.h"
 #include <string.h> // for memcpy
@@ -8,7 +8,8 @@
 #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
 #endif
 
-static inline uint32_t svb_decode_data(const uint8_t **dataPtrPtr, uint8_t code) {
+static inline uint32_t svb_decode_data(const uint8_t **dataPtrPtr,
+                                       uint8_t code) {
   const uint8_t *dataPtr = *dataPtrPtr;
   uint32_t val;
 
@@ -31,9 +32,9 @@ static inline uint32_t svb_decode_data(const uint8_t **dataPtrPtr, uint8_t code)
 }
 
 static const uint8_t *svb_decode_scalar_d1_init(uint32_t *outPtr,
-                                         const uint8_t *keyPtr,
-                                         const uint8_t *dataPtr, uint32_t count,
-                                         uint32_t prev) {
+                                                const uint8_t *keyPtr,
+                                                const uint8_t *dataPtr,
+                                                uint32_t count, uint32_t prev) {
   if (count == 0)
     return dataPtr; // no reads or writes if no data
 
@@ -59,15 +60,34 @@ static const uint8_t *svb_decode_scalar_d1_init(uint32_t *outPtr,
 #include "streamvbytedelta_x64_decode.c"
 #endif
 
+#if defined(STREAMVBYTE_IS_ARM64)
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
+#include "streamvbyte_arm_decode.c"
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+#include "streamvbytedelta_arm_decode.c"
+#endif
+
 size_t streamvbyte_delta_decode(const uint8_t *in, uint32_t *out,
                                 uint32_t count, uint32_t prev) {
   uint32_t keyLen = ((count + 3) / 4); // 2-bits per key (rounded up)
   const uint8_t *keyPtr = in;
   const uint8_t *dataPtr = keyPtr + keyLen; // data starts at end of keys
 #ifdef STREAMVBYTE_X64
-  if(streamvbyte_sse41()) {
-    return (size_t)(svb_decode_sse41_d1_init(out, keyPtr, dataPtr, count, prev) - in);
+  if (streamvbyte_sse41()) {
+    return (
+        size_t)(svb_decode_sse41_d1_init(out, keyPtr, dataPtr, count, prev) -
+                in);
   }
+#elif defined(STREAMVBYTE_IS_ARM64)
+  return (size_t)(svb_decode_neon_d1_init(out, keyPtr, dataPtr, count, prev) -
+                  in);
+#else
+  return (size_t)(svb_decode_scalar_d1_init(out, keyPtr, dataPtr, count, prev) -
+                  in);
 #endif
-  return (size_t)(svb_decode_scalar_d1_init(out, keyPtr, dataPtr, count, prev) - in);
 }

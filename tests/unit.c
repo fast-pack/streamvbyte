@@ -2964,6 +2964,9 @@ static bool issue69(void) {
 #if defined(STREAMVBYTE_IS_ARM64)
 size_t streamvbyte_encode_neon_d1_init(const uint32_t *in, uint32_t count,
                                        uint8_t *out, uint32_t prev);
+const uint8_t *svb_decode_neon_d1_init(uint32_t *out, const uint8_t *keyPtr,
+                                       const uint8_t *dataPtr, uint64_t count,
+                                       uint32_t prev);
 #endif
 
 static size_t ref_delta_encode(const uint32_t *in, uint32_t count, uint8_t *out,
@@ -3185,9 +3188,229 @@ fail:
   return -1;
 }
 
+static int test_delta_decode_neon(void) {
+  uint32_t counts[128];
+  size_t num_counts = 0;
+  for (uint32_t c = 1; c <= 65; c++) {
+    counts[num_counts++] = c;
+  }
+  const uint32_t extra_counts[] = {70,  95,  96,  97,  100,  127, 128,
+                                   129, 255, 256, 257, 500,  511, 512,
+                                   513, 768, 769, 1023, 1024};
+  for (size_t i = 0; i < sizeof(extra_counts) / sizeof(extra_counts[0]); i++) {
+    counts[num_counts++] = extra_counts[i];
+  }
+
+  const uint32_t max_count = 1024;
+  const uint32_t canary_len = 32;
+  const uint32_t canary_val = 0xDEADBEEFU;
+
+  const uint32_t deltas[] = {
+      1,        5,         200,        // 1-byte deltas
+      256,      1000,      65000,      // 2-byte deltas
+      65536,    100000,    16000000,   // 3-byte deltas
+      16777216, 100000000, 0x12345678U // 4-byte deltas
+  };
+  const size_t num_deltas = sizeof(deltas) / sizeof(deltas[0]);
+
+  const uint32_t prev_values[] = {0, 42, 0xDEADBEEFU};
+  const size_t num_prev = sizeof(prev_values) / sizeof(prev_values[0]);
+
+  size_t in_buf_size = (max_count + 16) * sizeof(uint32_t);
+  size_t comp_buf_size = streamvbyte_max_compressedbytes(max_count) + 64;
+  size_t out_buf_size =
+      (canary_len + max_count + canary_len) * sizeof(uint32_t);
+
+  uint32_t *raw_in = malloc(in_buf_size);
+  uint8_t *raw_comp = malloc(comp_buf_size);
+  uint32_t *raw_out = malloc(out_buf_size);
+  uint32_t *raw_neon = malloc(out_buf_size);
+
+  if (!raw_in || !raw_comp || !raw_out || !raw_neon) {
+    fprintf(stderr, "[test_delta_decode_neon] allocation failed\n");
+    free(raw_in);
+    free(raw_comp);
+    free(raw_out);
+    free(raw_neon);
+    return -1;
+  }
+
+  for (int pattern = -1; pattern < (int)num_deltas; pattern++) {
+    for (size_t p = 0; p < num_prev; p++) {
+      uint32_t prev = prev_values[p];
+
+      uint32_t running = prev;
+      for (uint32_t i = 0; i < max_count + 16; i++) {
+        uint32_t d;
+        if (pattern == -1) {
+          uint32_t r = (uint32_t)rand();
+          switch (i % 4) {
+          case 0:
+            d = (r % 255) + 1;
+            break;
+          case 1:
+            d = ((r % 65280) + 256);
+            break;
+          case 2:
+            d = ((r % 16711680) + 65536);
+            break;
+          default:
+            d = (r | 0x10000000U);
+            break;
+          }
+        } else {
+          d = deltas[pattern];
+        }
+        running += d;
+        raw_in[i] = running;
+      }
+
+      for (size_t ci = 0; ci < num_counts; ci++) {
+        uint32_t count = counts[ci];
+
+        for (uint32_t offset_comp = 0; offset_comp < 8; offset_comp += 2) {
+          for (uint32_t in_offset = 0; in_offset < 8; in_offset += 2) {
+            if (count + in_offset > max_count + 16)
+              continue;
+
+            const uint32_t *in = raw_in + in_offset;
+            uint8_t *comp = raw_comp + offset_comp;
+
+            // Encode reference stream
+            size_t comp_len = streamvbyte_delta_encode(in, count, comp, prev);
+
+            // Test 1: streamvbyte_delta_decode
+            for (size_t k = 0; k < canary_len + max_count + canary_len; k++) {
+              raw_out[k] = canary_val;
+            }
+            uint32_t *out = raw_out + canary_len;
+
+            size_t dec_bytes =
+                streamvbyte_delta_decode(comp, out, count, prev);
+            if (dec_bytes != comp_len) {
+              fprintf(stderr,
+                      "[test_delta_decode_neon] streamvbyte_delta_decode length "
+                      "mismatch: dec=%zu comp=%zu (count=%u, pattern=%d, "
+                      "offset_comp=%u, in_offset=%u)\n",
+                      dec_bytes, comp_len, count, pattern, offset_comp,
+                      in_offset);
+              goto fail;
+            }
+
+            // Verify before canary
+            for (uint32_t k = 0; k < canary_len; k++) {
+              if (raw_out[k] != canary_val) {
+                fprintf(stderr,
+                        "[test_delta_decode_neon] streamvbyte_delta_decode "
+                        "before canary clobbered at %u: 0x%08X (count=%u)\n",
+                        k, raw_out[k], count);
+                goto fail;
+              }
+            }
+
+            // Verify decoded values
+            for (uint32_t k = 0; k < count; k++) {
+              if (out[k] != in[k]) {
+                fprintf(stderr,
+                        "[test_delta_decode_neon] streamvbyte_delta_decode "
+                        "value mismatch at %u: out=%u in=%u (count=%u, "
+                        "pattern=%d)\n",
+                        k, out[k], in[k], count, pattern);
+                goto fail;
+              }
+            }
+
+            // Verify after canary
+            for (uint32_t k = 0; k < canary_len; k++) {
+              if (out[count + k] != canary_val) {
+                fprintf(stderr,
+                        "[test_delta_decode_neon] streamvbyte_delta_decode "
+                        "after canary clobbered at %u: 0x%08X (count=%u)\n",
+                        k, out[count + k], count);
+                goto fail;
+              }
+            }
+
+#if defined(STREAMVBYTE_IS_ARM64)
+            // Test 2: direct svb_decode_neon_d1_init call
+            for (size_t k = 0; k < canary_len + max_count + canary_len; k++) {
+              raw_neon[k] = canary_val;
+            }
+            uint32_t *out_neon = raw_neon + canary_len;
+
+            uint32_t keyLen = (count + 3) / 4;
+            const uint8_t *keyPtr = comp;
+            const uint8_t *dataPtr = comp + keyLen;
+
+            const uint8_t *neon_end = svb_decode_neon_d1_init(
+                out_neon, keyPtr, dataPtr, count, prev);
+            size_t neon_dec_bytes = (size_t)(neon_end - comp);
+            if (neon_dec_bytes != comp_len) {
+              fprintf(stderr,
+                      "[test_delta_decode_neon] svb_decode_neon_d1_init length "
+                      "mismatch: dec=%zu comp=%zu (count=%u, pattern=%d)\n",
+                      neon_dec_bytes, comp_len, count, pattern);
+              goto fail;
+            }
+
+            for (uint32_t k = 0; k < canary_len; k++) {
+              if (raw_neon[k] != canary_val) {
+                fprintf(stderr,
+                        "[test_delta_decode_neon] svb_decode_neon_d1_init "
+                        "before canary clobbered at %u: 0x%08X (count=%u)\n",
+                        k, raw_neon[k], count);
+                goto fail;
+              }
+            }
+
+            for (uint32_t k = 0; k < count; k++) {
+              if (out_neon[k] != in[k]) {
+                fprintf(stderr,
+                        "[test_delta_decode_neon] svb_decode_neon_d1_init "
+                        "value mismatch at %u: out=%u in=%u (count=%u, "
+                        "pattern=%d)\n",
+                        k, out_neon[k], in[k], count, pattern);
+                goto fail;
+              }
+            }
+
+            for (uint32_t k = 0; k < canary_len; k++) {
+              if (out_neon[count + k] != canary_val) {
+                fprintf(stderr,
+                        "[test_delta_decode_neon] svb_decode_neon_d1_init "
+                        "after canary clobbered at %u: 0x%08X (count=%u)\n",
+                        k, out_neon[count + k], count);
+                goto fail;
+              }
+            }
+#endif
+          }
+        }
+      }
+    }
+  }
+
+  free(raw_in);
+  free(raw_comp);
+  free(raw_out);
+  free(raw_neon);
+  return 0;
+
+fail:
+  free(raw_in);
+  free(raw_comp);
+  free(raw_out);
+  free(raw_neon);
+  return -1;
+}
+
 int main(void) {
   if (!unpaddedtests()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (test_delta_encode_neon() == -1) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
+  if (test_delta_decode_neon() == -1) {
     printf("tests failed.\n");
     return EXIT_FAILURE;
   }
