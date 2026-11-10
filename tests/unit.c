@@ -8,6 +8,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#elif defined(__unix__) || defined(__APPLE__)
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wdeclaration-after-statement"
 #endif
@@ -16,6 +27,152 @@ static bool isLittleEndian(void) {
   int x = 1;
   char *c = (char *)&x;
   return (*c == 1);
+}
+
+// A readable page followed by an inaccessible page. Place the last stream
+// byte at the boundary so even a one-byte over-read fails without a sanitizer.
+static uint8_t *guardedpage(size_t *pageSize) {
+#if defined(_WIN32)
+  SYSTEM_INFO info;
+  GetSystemInfo(&info);
+  *pageSize = info.dwPageSize;
+  uint8_t *pages = VirtualAlloc(NULL, 2 * *pageSize,
+                               MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+  DWORD oldProtect;
+  if (pages && !VirtualProtect(pages + *pageSize, *pageSize,
+                              PAGE_NOACCESS, &oldProtect)) {
+    VirtualFree(pages, 0, MEM_RELEASE);
+    return NULL;
+  }
+  return pages;
+#elif defined(__unix__) || defined(__APPLE__)
+  long size = sysconf(_SC_PAGESIZE);
+  if (size <= 0) return NULL;
+  *pageSize = (size_t)size;
+#if defined(MAP_ANON)
+  // macOS cannot map /dev/zero, but exposes MAP_ANON even in strict C99.
+  void *pages = mmap(NULL, 2 * *pageSize, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANON, -1, 0);
+#else
+  // /dev/zero works with strict C99 without MAP_ANONYMOUS feature macros.
+  int fd = open("/dev/zero", O_RDWR);
+  if (fd < 0) return NULL;
+  void *pages = mmap(NULL, 2 * *pageSize, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE, fd, 0);
+  close(fd);
+#endif
+  if (pages == MAP_FAILED) return NULL;
+  if (mprotect((uint8_t *)pages + *pageSize, *pageSize, PROT_NONE) != 0) {
+    munmap(pages, 2 * *pageSize);
+    return NULL;
+  }
+  return (uint8_t *)pages;
+#else
+  (void)pageSize;
+  return NULL;
+#endif
+}
+
+static void freeguardedpage(uint8_t *pages, size_t pageSize) {
+#if defined(_WIN32)
+  (void)pageSize;
+  VirtualFree(pages, 0, MEM_RELEASE);
+#elif defined(__unix__) || defined(__APPLE__)
+  munmap(pages, 2 * pageSize);
+#else
+  (void)pages;
+  (void)pageSize;
+#endif
+}
+
+static bool unpaddedtests(void) {
+  enum { MAX_COUNT = 513 };
+  const uint32_t values[] = {0, 0xff, 0x100, 0xffff, 0x10000,
+                             0xffffff, 0x1000000, UINT32_MAX};
+  uint32_t input[MAX_COUNT], paddedOutput[MAX_COUNT];
+  uint8_t encoded[(MAX_COUNT + 3) / 4 + 4 * MAX_COUNT + STREAMVBYTE_PADDING];
+  size_t inputPageSize = 0, outputPageSize = 0;
+  uint8_t *inputPage = guardedpage(&inputPageSize);
+  uint8_t *outputPage = guardedpage(&outputPageSize);
+  bool ok = false;
+
+  if (streamvbyte_decode_unpadded(NULL, NULL, 0) != 0) goto cleanup;
+  if (!inputPage || !outputPage || inputPageSize < sizeof(encoded) ||
+      outputPageSize < sizeof(input)) {
+    // Some targets (e.g., Emscripten, which defines __unix__) lack mmap or
+    // mprotect. Fall back to exact allocations, which ASan still checks.
+    printf("[unpadded] guard pages unavailable; using exact allocations\n");
+    if (inputPage) freeguardedpage(inputPage, inputPageSize);
+    if (outputPage) freeguardedpage(outputPage, outputPageSize);
+    inputPage = NULL;
+    outputPage = NULL;
+  }
+
+  for (uint32_t count = 1; count <= MAX_COUNT; count++) {
+    // Exhaust small lengths, including every SIMD and scalar-tail boundary,
+    // then exercise larger batches and their neighboring lengths.
+    if (count > 160 && count != 255 && count != 256 && count != 257 &&
+        count != 511 && count != 512 && count != 513) continue;
+    for (uint32_t pattern = 0; pattern <= 256; pattern++) {
+      for (uint32_t i = 0; i < count; i++) {
+        if (pattern == 256) {
+          // A mixed-width prefix followed by the smallest possible tail.
+          input[i] = count - i <= STREAMVBYTE_PADDING ? 0 : values[i % 8];
+        } else {
+          // Every possible control byte, with both ends of each width range.
+          uint32_t code = (pattern >> (2 * (i % 4))) & 3;
+          input[i] = values[2 * code + ((i / 4) & 1)];
+        }
+      }
+      size_t size = streamvbyte_encode(input, count, encoded);
+      size_t paddedSize = streamvbyte_decode(encoded, paddedOutput, count);
+      // Exact allocations also expose over-reads and over-writes under ASan.
+      uint8_t *exactInput = malloc(size);
+      uint32_t *exactOutput = malloc(count * sizeof(uint32_t));
+      if (!exactInput || !exactOutput) {
+        free(exactInput);
+        free(exactOutput);
+        goto cleanup;
+      }
+      memcpy(exactInput, encoded, size);
+      size_t used = streamvbyte_decode_unpadded(exactInput, exactOutput, count);
+      bool matches = used == size && paddedSize == size &&
+                     memcmp(input, exactOutput, count * sizeof(uint32_t)) == 0 &&
+                     memcmp(input, paddedOutput, count * sizeof(uint32_t)) == 0;
+      free(exactInput);
+      free(exactOutput);
+      if (inputPage && outputPage) {
+        uint8_t *guardedInput = inputPage + inputPageSize - size;
+        uint32_t *guardedOutput = (uint32_t *)(outputPage + outputPageSize) - count;
+        memcpy(guardedInput, encoded, size);
+        used = streamvbyte_decode_unpadded(guardedInput, guardedOutput, count);
+        matches = matches && used == size &&
+                  memcmp(input, guardedOutput, count * sizeof(uint32_t)) == 0;
+      }
+      if (!matches) {
+        printf("[unpadded] mismatch count=%u pattern=%u\n", count, pattern);
+        goto cleanup;
+      }
+    }
+  }
+  if (inputPage) {
+    // A key-only stream ending at a guard page: validation must not read past
+    // the last key. Key 0 is valid for 0124 (four zeros, no data bytes) but
+    // invalid for the 1234 format. Write the key directly: the SIMD encoders
+    // need padding past the end of the output.
+    uint8_t *keyOnly = inputPage + inputPageSize - 1;
+    *keyOnly = 0;
+    if (!streamvbyte_validate_stream_0124(keyOnly, 1, 4) ||
+        streamvbyte_validate_stream(keyOnly, 1, 4)) {
+      printf("[unpadded] key-only stream validation failed\n");
+      goto cleanup;
+    }
+  }
+  ok = true;
+cleanup:
+  if (inputPage) freeguardedpage(inputPage, inputPageSize);
+  if (outputPage) freeguardedpage(outputPage, outputPageSize);
+  return ok;
 }
 
 // return -1 in case of failure
@@ -2805,6 +2962,7 @@ static bool issue69(void) {
 }
 
 int main(void) {
+  if (!unpaddedtests()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (!issue42()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (!issue69()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (zigzagtests() == -1) { printf("tests failed.\n"); return EXIT_FAILURE; }

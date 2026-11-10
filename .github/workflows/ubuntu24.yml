@@ -48,3 +48,9 @@ jobs:
           cmake .. -DSTREAMVBYTE_SANITIZE_UNDEFINED=ON -DCMAKE_BUILD_TYPE=buildundefsani -DSTREAMVBYTE_ENABLE_EXAMPLES=ON -DSTREAMVBYTE_ENABLE_TESTS=ON -DSTREAMVBYTE_WALL=ON -DSTREAMVBYTE_WERROR=ON &&
           cmake --build .   &&
           ctest --output-on-failure
+
+      - name: Use cmake (address sanitizer)
+        run: |
+          cmake -S . -B buildaddresssani -DCMAKE_BUILD_TYPE=Debug -DSTREAMVBYTE_SANITIZE=ON -DSTREAMVBYTE_ENABLE_TESTS=ON -DSTREAMVBYTE_WALL=ON -DSTREAMVBYTE_WERROR=ON -DCMAKE_C_COMPILER=${{matrix.compiler}}
+          cmake --build buildaddresssani --target unit
+          ctest --test-dir buildaddresssani --output-on-failure

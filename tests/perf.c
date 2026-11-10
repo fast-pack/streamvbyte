@@ -32,6 +32,12 @@ static void bench_decode(void *ud) {
   (void)r;
 }
 
+static void bench_decode_unpadded(void *ud) {
+  svb_ctx *ctx = (svb_ctx *)ud;
+  size_t r = streamvbyte_decode_unpadded(ctx->compressedbuffer, ctx->recovdata, (uint32_t)ctx->n);
+  (void)r;
+}
+
 static void print_aggregate(const char *label, size_t bytes_processed,
                             const counters_event_aggregate *agg, int have_counters) {
   double ns = counters_event_aggregate_elapsed_ns(agg);
@@ -103,6 +109,9 @@ static void run_benchmark(const char *title,
 
   counters_event_aggregate dec = counters_bench(bench_decode, &ctx, &params);
   print_aggregate("decode", N * sizeof(uint32_t), &dec, have_counters);
+
+  counters_event_aggregate unpadded = counters_bench(bench_decode_unpadded, &ctx, &params);
+  print_aggregate("unpadded", N * sizeof(uint32_t), &unpadded, have_counters);
 
   size_t compsize2 = streamvbyte_decode(compressedbuffer, recovdata, N);
   if (compsize != compsize2)
