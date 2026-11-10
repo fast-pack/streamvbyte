@@ -97,15 +97,16 @@ static bool unpaddedtests(void) {
   bool ok = false;
 
   if (streamvbyte_decode_unpadded(NULL, NULL, 0) != 0) goto cleanup;
-#if defined(_WIN32) || defined(__unix__) || defined(__APPLE__)
   if (!inputPage || !outputPage || inputPageSize < sizeof(encoded) ||
       outputPageSize < sizeof(input)) {
-    printf("[unpadded] guard page allocation failed\n");
-    goto cleanup;
+    // Some targets (e.g., Emscripten, which defines __unix__) lack mmap or
+    // mprotect. Fall back to exact allocations, which ASan still checks.
+    printf("[unpadded] guard pages unavailable; using exact allocations\n");
+    if (inputPage) freeguardedpage(inputPage, inputPageSize);
+    if (outputPage) freeguardedpage(outputPage, outputPageSize);
+    inputPage = NULL;
+    outputPage = NULL;
   }
-#else
-  printf("[unpadded] guard pages unavailable; using exact allocations\n");
-#endif
 
   for (uint32_t count = 1; count <= MAX_COUNT; count++) {
     // Exhaust small lengths, including every SIMD and scalar-tail boundary,
