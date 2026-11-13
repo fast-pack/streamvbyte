@@ -3447,6 +3447,144 @@ static int test_delta_decode_zero_keys(void) {
     }
   }
 
+  // Part 2: Exact-boundary and guard-page check for keys == 0 multiples of 32.
+  // Because each 32-integer zero-key block ends with an 8-byte load (vld1_u8 on
+  // ARM64 NEON, _mm_loadl_epi64 on x86_64 SSE4.1) and count % 32 == 0 has no
+  // scalar tail, decoding reads zero bytes past comp_len.
+  {
+    const uint32_t exact_counts[] = {32, 64, 96, 128};
+    size_t in_page_size = 0, out_page_size = 0;
+    uint8_t *in_page = guardedpage(&in_page_size);
+    uint8_t *out_page = guardedpage(&out_page_size);
+
+    for (size_t ci = 0; ci < sizeof(exact_counts) / sizeof(exact_counts[0]);
+         ci++) {
+      uint32_t count = exact_counts[ci];
+      uint32_t prev = 0x13579BDFU;
+      uint32_t running = prev;
+      for (uint32_t i = 0; i < count; i++) {
+        running += ((i * 37 + 13) % 255) + 1;
+        raw_in[i] = running;
+      }
+      size_t comp_len = streamvbyte_delta_encode(raw_in, count, raw_comp, prev);
+
+      uint8_t *exact_in = malloc(comp_len);
+      uint32_t *exact_out = malloc(count * sizeof(uint32_t));
+      if (!exact_in || !exact_out) {
+        free(exact_in);
+        free(exact_out);
+        if (in_page)
+          freeguardedpage(in_page, in_page_size);
+        if (out_page)
+          freeguardedpage(out_page, out_page_size);
+        goto fail;
+      }
+      memcpy(exact_in, raw_comp, comp_len);
+      size_t used = streamvbyte_delta_decode(exact_in, exact_out, count, prev);
+      bool ok = (used == comp_len) &&
+                (memcmp(raw_in, exact_out, count * sizeof(uint32_t)) == 0);
+      free(exact_in);
+      free(exact_out);
+      if (!ok) {
+        fprintf(stderr,
+                "[test_delta_decode_zero_keys] exact-allocation decode failed "
+                "for count=%u\n",
+                count);
+        if (in_page)
+          freeguardedpage(in_page, in_page_size);
+        if (out_page)
+          freeguardedpage(out_page, out_page_size);
+        goto fail;
+      }
+
+      if (in_page && out_page && in_page_size >= comp_len &&
+          out_page_size >= count * sizeof(uint32_t)) {
+        uint8_t *guarded_in = in_page + in_page_size - comp_len;
+        uint32_t *guarded_out =
+            (uint32_t *)(out_page + out_page_size) - count;
+        memcpy(guarded_in, raw_comp, comp_len);
+        used = streamvbyte_delta_decode(guarded_in, guarded_out, count, prev);
+        if (used != comp_len ||
+            memcmp(raw_in, guarded_out, count * sizeof(uint32_t)) != 0) {
+          fprintf(stderr,
+                  "[test_delta_decode_zero_keys] guard-page decode failed for "
+                  "count=%u\n",
+                  count);
+          freeguardedpage(in_page, in_page_size);
+          freeguardedpage(out_page, out_page_size);
+          goto fail;
+        }
+      }
+    }
+
+    if (in_page)
+      freeguardedpage(in_page, in_page_size);
+    if (out_page)
+      freeguardedpage(out_page, out_page_size);
+  }
+
+  // Part 3: Multi-block transitions between keys == 0 and keys != 0 across
+  // 32-element boundaries and into scalar tails (count & 31 != 0).
+  {
+    const uint32_t trans_counts[] = {32, 33, 37, 63, 64, 65, 95, 96, 97, 128};
+    const uint32_t mixed_deltas[4] = {0x42U, 0x1234U, 0x345678U, 0x12345678U};
+    for (int mode = 0; mode < 4; mode++) {
+      for (size_t ci = 0; ci < sizeof(trans_counts) / sizeof(trans_counts[0]);
+           ci++) {
+        uint32_t count = trans_counts[ci];
+        uint32_t prev = 0x2468ACE0U;
+        uint32_t running = prev;
+        for (uint32_t i = 0; i < count; i++) {
+          uint32_t blk = i / 32;
+          bool zero_key_blk = false;
+          switch (mode) {
+          case 0:
+            zero_key_blk = ((blk & 1U) == 0);
+            break;
+          case 1:
+            zero_key_blk = ((blk & 1U) != 0);
+            break;
+          case 2:
+            zero_key_blk = (blk < 2);
+            break;
+          default:
+            zero_key_blk = (blk >= 1);
+            break;
+          }
+          uint32_t d = zero_key_blk ? (((i * 29 + 7) % 255) + 1)
+                                    : mixed_deltas[(i + blk) & 3U];
+          running += d;
+          raw_in[i] = running;
+        }
+
+        size_t comp_len =
+            streamvbyte_delta_encode(raw_in, count, raw_comp, prev);
+        for (size_t k = 0; k < canary_len + max_count + canary_len; k++) {
+          raw_out[k] = canary_val;
+        }
+        uint32_t *out = raw_out + canary_len;
+        size_t dec_bytes = streamvbyte_delta_decode(raw_comp, out, count, prev);
+        if (dec_bytes != comp_len ||
+            memcmp(raw_in, out, count * sizeof(uint32_t)) != 0) {
+          fprintf(stderr,
+                  "[test_delta_decode_zero_keys] transition decode mismatch "
+                  "(mode=%d, count=%u)\n",
+                  mode, count);
+          goto fail;
+        }
+        for (uint32_t k = 0; k < canary_len; k++) {
+          if (raw_out[k] != canary_val || out[count + k] != canary_val) {
+            fprintf(stderr,
+                    "[test_delta_decode_zero_keys] transition canary clobbered "
+                    "(mode=%d, count=%u)\n",
+                    mode, count);
+            goto fail;
+          }
+        }
+      }
+    }
+  }
+
   free(raw_in);
   free(raw_comp);
   free(raw_out);
