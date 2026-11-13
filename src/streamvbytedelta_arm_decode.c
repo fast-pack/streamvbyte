@@ -65,14 +65,11 @@ svb_decode_neon_d1_init(uint32_t *out, const uint8_t *__restrict__ keyPtr,
     const uint16x8_t zero16 = vdupq_n_u16(0);
 
     const uint8_t *kPtr = keyPtr;
-    uint64_t nextkeys;
-    memcpy(&nextkeys, kPtr, sizeof(nextkeys));
-    kPtr += sizeof(nextkeys);
 
-    for (size_t b = 0; b < (keybytes / 8) - 1; ++b) {
-      uint64_t keys = nextkeys;
-      memcpy(&nextkeys, kPtr, sizeof(nextkeys));
-      kPtr += sizeof(nextkeys);
+    for (size_t b = 0; b < keybytes / 8; ++b) {
+      uint64_t keys;
+      memcpy(&keys, kPtr, sizeof(keys));
+      kPtr += sizeof(keys);
 
       if (!keys) {
         Prev = svb_write_16bit_neon_d1(out, vmovl_u8(vld1_u8(dataPtr)), Prev,
@@ -97,29 +94,7 @@ svb_decode_neon_d1_init(uint32_t *out, const uint8_t *__restrict__ keyPtr,
       out += 32;
     }
 
-    uint64_t keys = nextkeys;
-    if (!keys) {
-      Prev = svb_write_16bit_neon_d1(out, vmovl_u8(vld1_u8(dataPtr)), Prev,
-                                     zero16);
-      Prev = svb_write_16bit_neon_d1(out + 8, vmovl_u8(vld1_u8(dataPtr + 8)),
-                                     Prev, zero16);
-      Prev = svb_write_16bit_neon_d1(out + 16, vmovl_u8(vld1_u8(dataPtr + 16)),
-                                     Prev, zero16);
-      Prev = svb_write_16bit_neon_d1(out + 24, vmovl_u8(vld1_u8(dataPtr + 24)),
-                                     Prev, zero16);
-      out += 32;
-      dataPtr += 32;
-    } else {
-      for (int i = 0; i < 8; ++i) {
-        uint8_t key = (uint8_t)(keys >> (8 * i));
-        uint8x16_t data = _decode_neon(key, &dataPtr);
-        Prev = svb_write_neon_d1(out + 4 * i, vreinterpretq_u32_u8(data), Prev,
-                                 zero);
-      }
-      out += 32;
-    }
-
-    prev = out[-1];
+    prev = vgetq_lane_u32(Prev, 3);
   }
 
   uint32_t consumedkeys = keybytes - (keybytes & 7);
