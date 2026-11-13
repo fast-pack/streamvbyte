@@ -28,11 +28,10 @@ static inline size_t streamvbyte_encode4(uint32x4_t data, uint8_t *__restrict__ 
 
   uint32x2_t mulshift = vreinterpret_u32_u8(lobytes);
 
-  uint32_t codeAndLength[2];
-  vst1_u32(codeAndLength, vmul_u32(mulshift, Aggregators));
-
-  uint32_t code = codeAndLength[0] >> 24;
-  size_t length = 4 + (codeAndLength[1] >> 24);
+  uint64_t codeAndLength = vget_lane_u64(
+      vreinterpret_u64_u32(vmul_u32(mulshift, Aggregators)), 0);
+  uint32_t code = (uint32_t)(codeAndLength >> 24);
+  size_t length = 4 + (size_t)(codeAndLength >> 56);
 
   // shuffle in 8-byte chunks
   uint8x16_t databytes = vreinterpretq_u8_u32(data);
