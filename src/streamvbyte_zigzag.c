@@ -12,7 +12,9 @@ void zigzag_encode(const int32_t * in, uint32_t * out, size_t N) {
 
 void zigzag_delta_encode(const int32_t * in, uint32_t * out, size_t N, int32_t prev) {
     for (size_t i = 0; i < N; i++) {
-      out[i] = svb_zigzag_encode_32((uint32_t)(in[i] - prev));
+      // Subtract as uint32_t: the difference of two int32_t values may
+      // overflow int32_t (undefined behavior), but wraps around as intended.
+      out[i] = svb_zigzag_encode_32((uint32_t)in[i] - (uint32_t)prev);
       prev = in[i];
     }
 }
@@ -30,9 +32,11 @@ void zigzag_decode(const uint32_t * in, int32_t * out, size_t N) {
 
 
 void zigzag_delta_decode(const uint32_t * in, int32_t * out, size_t N, int32_t prev) {
+    // Accumulate as uint32_t: the sum may overflow int32_t (undefined
+    // behavior), but wraps around as intended.
+    uint32_t acc = (uint32_t)prev;
     for(size_t i = 0; i < N; i++) {
-      int32_t val =svb_zigzag_decode_32(in[i]);
-      out[i] = val + prev;
-      prev += val;
+      acc += (uint32_t)svb_zigzag_decode_32(in[i]);
+      out[i] = (int32_t)acc;
     }
 }

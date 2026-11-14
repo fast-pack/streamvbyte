@@ -91,12 +91,14 @@ static const uint8_t *svb_decode_sse41_simple(uint32_t *out,
 
     int64_t Offset = -(int64_t)keybytes / 8 + 1;
 
-    const uint64_t *keyPtr64 = (const uint64_t *)keyPtr - Offset;
+    // A byte pointer: converting keyPtr to a (possibly misaligned) uint64_t
+    // pointer would be undefined behavior. The keys are read with memcpy.
+    const uint8_t *keyPtr64 = keyPtr - 8 * Offset;
     uint64_t nextkeys;
-    memcpy(&nextkeys, keyPtr64 + Offset, sizeof(nextkeys));
+    memcpy(&nextkeys, keyPtr64 + 8 * Offset, sizeof(nextkeys));
     for (; Offset != 0; ++Offset) {
       uint64_t keys = nextkeys;
-      memcpy(&nextkeys, keyPtr64 + Offset + 1, sizeof(nextkeys));
+      memcpy(&nextkeys, keyPtr64 + 8 * (Offset + 1), sizeof(nextkeys));
 
       Data = svb_decode_sse41((keys & 0xFF), &dataPtr);
       svb_write_sse41(out, Data);

@@ -95,6 +95,14 @@ if(STREAMVBYTE_SANITIZE)
     )
 endif()
 
+# Must come before the library target: add_compile_options only applies to
+# targets defined after it.
+option(STREAMVBYTE_SANITIZE_UNDEFINED "Sanitize undefined behavior" OFF)
+if(STREAMVBYTE_SANITIZE_UNDEFINED)
+    add_compile_options(-fsanitize=undefined -fno-sanitize-recover=all)
+    add_link_options(-fsanitize=undefined -fno-sanitize-recover=all)
+endif()
+
 if(MSVC)
     add_definitions("-D__restrict__=__restrict")
 endif()
@@ -142,12 +150,6 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-option(STREAMVBYTE_SANITIZE_UNDEFINED "Sanitize undefined behavior" OFF)
-if(STREAMVBYTE_SANITIZE_UNDEFINED)
-    add_compile_options(-fsanitize=undefined -fno-sanitize-recover=all)
-    add_link_options(-fsanitize=undefined -fno-sanitize-recover=all)
-endif()
 
 message(STATUS "CMAKE_SYSTEM_PROCESSOR: " ${CMAKE_SYSTEM_PROCESSOR})
 message(STATUS "CMAKE_BUILD_TYPE: " ${CMAKE_BUILD_TYPE}) # this tends to be "sticky" so you can remain unknowingly in debug mode
