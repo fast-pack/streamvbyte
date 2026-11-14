@@ -157,15 +157,70 @@ static const uint8_t *svb_decode_sse41_simple(uint32_t *out,
 }
 STREAMVBYTE_UNTARGET_REGION
 
+// Same as svb_decode_sse41_simple, but a block of 32 integers whose keys are
+// all 0 (32 zeros, no data bytes) or all 3 (32 4-byte integers) takes a fast
+// path. Only used by streamvbyte_decode_0124_branchy.
+STREAMVBYTE_TARGET_SSE41
+static const uint8_t *svb_decode_sse41_branchy(uint32_t *out,
+                                               const uint8_t *__restrict__ keyPtr,
+                                               const uint8_t *__restrict__ dataPtr,
+                                               uint64_t count) {
+  uint64_t keybytes = count / 4; // number of key bytes
+  __m128i Data;
+  for (; keybytes >= 8; keybytes -= 8, keyPtr += 8, out += 32) {
+    uint64_t keys;
+    memcpy(&keys, keyPtr, sizeof(keys));
+    if (keys == 0) {
+      const __m128i zero = _mm_setzero_si128();
+      for (int i = 0; i < 8; i++)
+        svb_write_sse41(out + 4 * i, zero);
+      continue;
+    }
+    if (keys == ~UINT64_C(0)) {
+      for (int i = 0; i < 8; i++)
+        svb_write_sse41(out + 4 * i,
+                        _mm_loadu_si128((const __m128i *)(dataPtr + 16 * i)));
+      dataPtr += 128;
+      continue;
+    }
+    for (int i = 0; i < 8; i++) {
+      Data = svb_decode_sse41((uint32_t)(keys & 0xFF), &dataPtr);
+      svb_write_sse41(out + 4 * i, Data);
+      keys >>= 8;
+    }
+  }
+  return dataPtr;
+}
+STREAMVBYTE_UNTARGET_REGION
 
 #endif
 
-// Read count 32-bit integers in maskedvbyte format from in, storing the result
-// in out.  Returns the number of bytes read.
-size_t streamvbyte_decode_0124(const uint8_t *in, uint32_t *out, uint32_t count) {
+// Scalar decoder with fast paths for blocks of 32 integers whose keys are all
+// 0 (zeros) or all 3 (4-byte values). Byte-order independent.
+static const uint8_t *svb_decode_scalar_branchy(uint32_t *out,
+                                                const uint8_t *keyPtr,
+                                                const uint8_t *dataPtr,
+                                                uint32_t count) {
+  for (; count >= 32; count -= 32, keyPtr += 8, out += 32) {
+    uint64_t keys;
+    memcpy(&keys, keyPtr, sizeof(keys));
+    if (keys == 0) {
+      memset(out, 0, 32 * sizeof(uint32_t));
+    } else if (keys == ~UINT64_C(0)) {
+      for (int i = 0; i < 32; i++)
+        out[i] = svb_load_le(dataPtr + 4 * i, 4);
+      dataPtr += 128;
+    } else {
+      dataPtr = svb_decode_scalar(out, keyPtr, dataPtr, 32);
+    }
+  }
+  return svb_decode_scalar(out, keyPtr, dataPtr, count);
+}
+
+static inline size_t svb_decode_0124(const uint8_t *in, uint32_t *out,
+                                     uint32_t count, bool branchy) {
   if (count == 0)
     return 0;
-
 
   const uint8_t *keyPtr = in;               // full list of keys is next
   uint32_t keyLen = ((count + 3) / 4);      // 2-bits per key (rounded up)
@@ -173,14 +228,28 @@ size_t streamvbyte_decode_0124(const uint8_t *in, uint32_t *out, uint32_t count)
 
 #ifdef STREAMVBYTE_X64
   if(streamvbyte_sse41()) {
-    dataPtr = svb_decode_sse41_simple(out, keyPtr, dataPtr, count);
+    dataPtr = branchy ? svb_decode_sse41_branchy(out, keyPtr, dataPtr, count)
+                      : svb_decode_sse41_simple(out, keyPtr, dataPtr, count);
     out += count & ~ 31U;
     keyPtr += (count/4) & ~ 7U;
     count &= 31;
   }
 #endif
 
+  if (branchy)
+    return (size_t)(svb_decode_scalar_branchy(out, keyPtr, dataPtr, count) - in);
   return (size_t)(svb_decode_scalar(out, keyPtr, dataPtr, count) - in);
+}
+
+// Read count 32-bit integers in maskedvbyte format from in, storing the result
+// in out.  Returns the number of bytes read.
+size_t streamvbyte_decode_0124(const uint8_t *in, uint32_t *out, uint32_t count) {
+  return svb_decode_0124(in, out, count, false);
+}
+
+size_t streamvbyte_decode_0124_branchy(const uint8_t *in, uint32_t *out,
+                                       uint32_t count) {
+  return svb_decode_0124(in, out, count, true);
 }
 
 bool streamvbyte_validate_stream_0124(const uint8_t *in, size_t inCount,

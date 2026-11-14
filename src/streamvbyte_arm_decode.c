@@ -78,6 +78,60 @@ static const uint8_t *svb_decode_vector(uint32_t *__restrict__ out,
   return dataPtr;
 }
 
+// Same as svb_decode_vector, but blocks of 32 integers that are all 1-byte
+// (8 key bytes equal to 0x00) or all 4-byte (8 key bytes equal to 0xFF) take
+// dedicated fast paths. Much faster on such data, but these branches mispredict
+// when only some blocks qualify, so this kernel is only used by the *_branchy
+// functions.
+static const uint8_t *svb_decode_vector_branchy(uint32_t *__restrict__ out,
+                                                const uint8_t *__restrict__ keyPtr,
+                                                const uint8_t *__restrict__ dataPtr,
+                                                uint32_t count) {
+  uint32_t keybytes = count / 4;
+  while (keybytes >= 8) {
+    uint64_t keys;
+    memcpy(&keys, keyPtr, sizeof(keys));
+    if (keys == 0) { // 32 1-byte integers
+      const uint8x16_t v0 = vld1q_u8(dataPtr);
+      const uint8x16_t v1 = vld1q_u8(dataPtr + 16);
+      const uint16x8_t a = vmovl_u8(vget_low_u8(v0));
+      const uint16x8_t b = vmovl_u8(vget_high_u8(v0));
+      const uint16x8_t c = vmovl_u8(vget_low_u8(v1));
+      const uint16x8_t d = vmovl_u8(vget_high_u8(v1));
+      vst1q_u32(out + 0, vmovl_u16(vget_low_u16(a)));
+      vst1q_u32(out + 4, vmovl_u16(vget_high_u16(a)));
+      vst1q_u32(out + 8, vmovl_u16(vget_low_u16(b)));
+      vst1q_u32(out + 12, vmovl_u16(vget_high_u16(b)));
+      vst1q_u32(out + 16, vmovl_u16(vget_low_u16(c)));
+      vst1q_u32(out + 20, vmovl_u16(vget_high_u16(c)));
+      vst1q_u32(out + 24, vmovl_u16(vget_low_u16(d)));
+      vst1q_u32(out + 28, vmovl_u16(vget_high_u16(d)));
+      dataPtr += 32;
+    } else if (keys == ~UINT64_C(0)) { // 32 4-byte integers: a plain copy
+      for (int i = 0; i < 8; i++)
+        vst1q_u8((uint8_t *)(out + 4 * i), vld1q_u8(dataPtr + 16 * i));
+      dataPtr += 128;
+    } else {
+#if defined(__clang__)
+#pragma clang loop unroll(disable)
+#elif defined(__GNUC__)
+#pragma GCC unroll 1
+#endif
+      for (uint32_t i = 0; i < 8; i++) {
+        streamvbyte_decode_quad(&dataPtr, (uint8_t)keys, out + 4 * i);
+        keys >>= 8;
+      }
+    }
+    out += 32;
+    keyPtr += 8;
+    keybytes -= 8;
+  }
+  for (uint32_t i = 0; i < keybytes; i++)
+    streamvbyte_decode_quad(&dataPtr, keyPtr[i], out + 4 * i);
+
+  return dataPtr;
+}
+
 static uint64_t svb_validate_vector(const uint8_t **keyPtrPtr,
                                     uint32_t *countPtr) {
   // Reduce the count by how many we'll process

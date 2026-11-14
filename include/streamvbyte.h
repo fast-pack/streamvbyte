@@ -76,6 +76,20 @@ size_t streamvbyte_decode_unpadded(const uint8_t* in, uint32_t* out, uint32_t le
 // streamvbyte_encode_0124.
 size_t streamvbyte_decode_0124(const uint8_t* in, uint32_t* out, uint32_t length);
 
+// Branchy variants of the decoders above: same formats, results, return
+// values and input requirements (streamvbyte_decode_unpadded_branchy reads no
+// padding, the others may read up to STREAMVBYTE_PADDING extra bytes).
+// They add fast paths for blocks of 32 consecutive integers that all use the
+// same width: all 1-byte or all 4-byte values (for 0124: all zeros or all
+// 4-byte values). They can be several times faster when such blocks dominate
+// (e.g., small counters, term frequencies, hashes, random 32-bit identifiers),
+// but they can be 10-25% slower than the regular decoders when only some of the
+// blocks qualify (e.g., mostly small values with occasional large ones), since
+// the extra branches are then hard to predict. Benchmark with your own data.
+size_t streamvbyte_decode_branchy(const uint8_t* in, uint32_t* out, uint32_t length);
+size_t streamvbyte_decode_unpadded_branchy(const uint8_t* in, uint32_t* out, uint32_t length);
+size_t streamvbyte_decode_0124_branchy(const uint8_t* in, uint32_t* out, uint32_t length);
+
 // Validate an encoded stream.
 // This can be used to validate that data received from an untrusted source (disk, network,
 // etc...) has a valid length stored alongside it.

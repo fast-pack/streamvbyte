@@ -28,6 +28,12 @@ size_t streamvbyte_delta_encode(const uint32_t* in, uint32_t length, uint8_t* ou
 // (you can often set prev to zero).
 size_t streamvbyte_delta_decode(const uint8_t* in, uint32_t* out, uint32_t length, uint32_t prev);
 
+// Same as streamvbyte_delta_decode, with fast paths for blocks of 32
+// consecutive deltas that are all 1-byte or all 4-byte. Faster when such blocks
+// dominate, possibly slower when only some blocks qualify (see
+// streamvbyte_decode_branchy in streamvbyte.h).
+size_t streamvbyte_delta_decode_branchy(const uint8_t* in, uint32_t* out, uint32_t length, uint32_t prev);
+
 #ifdef __cplusplus
 }
 #endif

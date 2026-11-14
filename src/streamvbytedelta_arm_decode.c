@@ -1,0 +1,157 @@
+#include "streamvbyte_isadetection.h"
+#include <string.h>
+
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdeclaration-after-statement"
+#pragma clang diagnostic ignored "-Wcast-align"
+#endif
+
+#if defined(STREAMVBYTE_IS_ARM64)
+#include "streamvbyte_shuffle_tables_decode.h"
+
+static inline uint8x16_t _decode_neon(const uint8_t key,
+                                      const uint8_t *__restrict__ *dataPtrPtr) {
+  uint8_t len;
+  const uint8_t *pshuf = (const uint8_t *)&shuffleTable[key];
+  uint8x16_t decodingShuffle = vld1q_u8(pshuf);
+  uint8x16_t compressed = vld1q_u8(*dataPtrPtr);
+#ifdef AVOIDLENGTHLOOKUP
+  len = pshuf[12 + (key >> 6)] + 1;
+#else
+  len = lengthTable[key];
+#endif
+  uint8x16_t data = vqtbl1q_u8(compressed, decodingShuffle);
+  *dataPtrPtr += len;
+  return data;
+}
+
+static inline uint32x4_t svb_write_neon_d1(uint32_t *out, uint32x4_t curr,
+                                           uint32x4_t prev, uint32x4_t zero) {
+  uint32x4_t add1 = vextq_u32(zero, curr, 3);
+  uint32x4_t p_last = vdupq_laneq_u32(prev, 3);
+  curr = vaddq_u32(curr, add1);
+  uint32x4_t add2 = vextq_u32(zero, curr, 2);
+  curr = vaddq_u32(curr, p_last);
+  curr = vaddq_u32(curr, add2);
+  vst1q_u32(out, curr);
+  return curr;
+}
+
+static inline uint32x4_t svb_write_16bit_neon_d1(uint32_t *out,
+                                                 uint16x8_t vec16,
+                                                 uint32x4_t prev,
+                                                 uint16x8_t zero16) {
+  uint16x8_t add1 = vextq_u16(zero16, vec16, 7);
+  vec16 = vaddq_u16(vec16, add1);
+  uint16x8_t add2 = vextq_u16(zero16, vec16, 6);
+  vec16 = vaddq_u16(vec16, add2);
+
+  uint32x4_t v1 = vaddw_u16(vdupq_laneq_u32(prev, 3), vget_low_u16(vec16));
+  uint32x4_t v2 = vaddw_u16(v1, vget_high_u16(vec16));
+
+  vst1q_u32(out, v1);
+  vst1q_u32(out + 4, v2);
+  return v2;
+}
+
+static const uint8_t *
+svb_decode_neon_d1_init(uint32_t *out, const uint8_t *__restrict__ keyPtr,
+                        const uint8_t *__restrict__ dataPtr, uint32_t count,
+                        uint32_t prev) {
+  uint32_t keybytes = count / 4;
+  if (keybytes >= 8) {
+    uint32x4_t Prev = vdupq_n_u32(prev);
+    const uint32x4_t zero = vdupq_n_u32(0);
+    const uint16x8_t zero16 = vdupq_n_u16(0);
+
+    const uint8_t *kPtr = keyPtr;
+
+    for (size_t b = 0; b < keybytes / 8; ++b) {
+      uint64_t keys;
+      memcpy(&keys, kPtr, sizeof(keys));
+      kPtr += sizeof(keys);
+
+      if (!keys) {
+        Prev = svb_write_16bit_neon_d1(out, vmovl_u8(vld1_u8(dataPtr)), Prev,
+                                       zero16);
+        Prev = svb_write_16bit_neon_d1(out + 8, vmovl_u8(vld1_u8(dataPtr + 8)),
+                                       Prev, zero16);
+        Prev = svb_write_16bit_neon_d1(
+            out + 16, vmovl_u8(vld1_u8(dataPtr + 16)), Prev, zero16);
+        Prev = svb_write_16bit_neon_d1(
+            out + 24, vmovl_u8(vld1_u8(dataPtr + 24)), Prev, zero16);
+        out += 32;
+        dataPtr += 32;
+        continue;
+      }
+
+      for (int i = 0; i < 8; ++i) {
+        uint8_t key = (uint8_t)(keys >> (8 * i));
+        uint8x16_t data = _decode_neon(key, &dataPtr);
+        Prev = svb_write_neon_d1(out + 4 * i, vreinterpretq_u32_u8(data), Prev,
+                                 zero);
+      }
+      out += 32;
+    }
+
+    prev = vgetq_lane_u32(Prev, 3);
+  }
+
+  uint32_t consumedkeys = keybytes - (keybytes & 7);
+  return svb_decode_scalar_d1_init(out, keyPtr + consumedkeys, dataPtr,
+                                   count & 31, prev);
+}
+
+// Like svb_write_neon_d1, but adds the previous value last, so that the
+// loop-carried dependency is only a lane broadcast and an addition.
+static inline uint32x4_t svb_write_neon_d1_short_chain(uint32_t *out,
+                                                       uint32x4_t curr,
+                                                       uint32x4_t prev,
+                                                       uint32x4_t zero) {
+  curr = vaddq_u32(curr, vextq_u32(zero, curr, 3)); // [A AB BC CD]
+  curr = vaddq_u32(curr, vextq_u32(zero, curr, 2)); // [A AB ABC ABCD]
+  curr = vaddq_u32(curr, vdupq_laneq_u32(prev, 3));
+  vst1q_u32(out, curr);
+  return curr;
+}
+
+// Same as svb_decode_neon_d1_init, but a block of 32 4-byte integers (8 key
+// bytes equal to 0xFF) also skips the shuffle. Only used by
+// streamvbyte_delta_decode_branchy.
+static const uint8_t *
+svb_decode_neon_d1_branchy(uint32_t *out, const uint8_t *__restrict__ keyPtr,
+                           const uint8_t *__restrict__ dataPtr, uint32_t count,
+                           uint32_t prev) {
+  uint32_t keybytes = count / 4;
+  uint32x4_t Prev = vdupq_n_u32(prev);
+  const uint32x4_t zero = vdupq_n_u32(0);
+  const uint16x8_t zero16 = vdupq_n_u16(0);
+  for (; keybytes >= 8; keybytes -= 8, keyPtr += 8, out += 32) {
+    uint64_t keys;
+    memcpy(&keys, keyPtr, sizeof(keys));
+    if (keys == 0) { // 32 1-byte deltas: 16-bit prefix sums
+      for (int i = 0; i < 4; i++)
+        Prev = svb_write_16bit_neon_d1(out + 8 * i,
+                                       vmovl_u8(vld1_u8(dataPtr + 8 * i)),
+                                       Prev, zero16);
+      dataPtr += 32;
+    } else if (keys == ~UINT64_C(0)) { // 32 4-byte deltas: no shuffle
+      for (int i = 0; i < 8; i++)
+        Prev = svb_write_neon_d1_short_chain(
+            out + 4 * i, vld1q_u32((const uint32_t *)(dataPtr + 16 * i)), Prev,
+            zero);
+      dataPtr += 128;
+    } else {
+      for (int i = 0; i < 8; ++i) {
+        uint8x16_t data = _decode_neon((uint8_t)keys, &dataPtr);
+        Prev = svb_write_neon_d1(out + 4 * i, vreinterpretq_u32_u8(data), Prev,
+                                 zero);
+        keys >>= 8;
+      }
+    }
+  }
+  return svb_decode_scalar_d1_init(out, keyPtr, dataPtr, count & 31,
+                                   vgetq_lane_u32(Prev, 3));
+}
+
+#endif
