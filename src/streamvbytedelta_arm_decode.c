@@ -138,7 +138,7 @@ svb_decode_neon_d1_branchy(uint32_t *out, const uint8_t *__restrict__ keyPtr,
     } else if (keys == ~UINT64_C(0)) { // 32 4-byte deltas: no shuffle
       for (int i = 0; i < 8; i++)
         Prev = svb_write_neon_d1_short_chain(
-            out + 4 * i, vld1q_u32((const uint32_t *)(dataPtr + 16 * i)), Prev,
+            out + 4 * i, vreinterpretq_u32_u8(vld1q_u8(dataPtr + 16 * i)), Prev,
             zero);
       dataPtr += 128;
     } else {

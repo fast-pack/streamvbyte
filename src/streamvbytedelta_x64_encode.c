@@ -55,7 +55,8 @@ static size_t streamvbyte_encode_SSE41_d1_init (const uint32_t* in, uint32_t cou
 		_mm_storeu_si128((__m128i *)dataPtr, r1);
 		dataPtr += len_lut[keys >> 8];
 
-		*((uint16_t*)keyPtr) = (uint16_t)keys;
+		uint16_t keys16 = (uint16_t)keys; // keyPtr may be misaligned
+		memcpy(keyPtr, &keys16, sizeof(keys16));
 		keyPtr += 2;
 	}
   prev = (uint32_t)_mm_extract_epi32(Prev,3);
