@@ -58,10 +58,39 @@ static const uint8_t *svb_decode_scalar(uint32_t *outPtr, const uint8_t *keyPtr,
   return dataPtr; // pointer to first unused byte after end
 }
 
+// Scalar decoder with the same fast paths as the *_branchy SIMD kernels: a
+// block of 32 integers whose 8 key bytes are all 0x00 (all 1-byte values) or
+// all 0xFF (all 4-byte values) is decoded without examining each key. These
+// two tests do not depend on byte order. Reads only bytes of the stream.
+static const uint8_t *svb_decode_scalar_branchy(uint32_t *out,
+                                                const uint8_t *keyPtr,
+                                                const uint8_t *dataPtr,
+                                                uint32_t count) {
+  for (; count >= 32; count -= 32, keyPtr += 8, out += 32) {
+    uint64_t keys;
+    memcpy(&keys, keyPtr, sizeof(keys));
+    if (keys == 0) {
+      for (int i = 0; i < 32; i++)
+        out[i] = dataPtr[i];
+      dataPtr += 32;
+    } else if (keys == ~UINT64_C(0)) {
+      for (int i = 0; i < 32; i++)
+        out[i] = svb_load_le(dataPtr + 4 * i, 4);
+      dataPtr += 128;
+    } else {
+      dataPtr = svb_decode_scalar(out, keyPtr, dataPtr, 32);
+    }
+  }
+  return svb_decode_scalar(out, keyPtr, dataPtr, count);
+}
+
 // Read count 32-bit integers in Stream VByte format from in, storing the result
-// in out.  Returns the number of bytes read.
+// in out.  Returns the number of bytes read. The SIMD kernel decodes the first
+// simd_count values (rounded down to whole batches). When branchy is true
+// (a compile-time constant at each call site), kernels with fast paths for
+// uniform blocks are used.
 static inline size_t svb_decode(const uint8_t *in, uint32_t *out, uint32_t count,
-                                uint32_t simd_count) {
+                                uint32_t simd_count, bool branchy) {
   if (count == 0)
     return 0;
 
@@ -72,14 +101,18 @@ static inline size_t svb_decode(const uint8_t *in, uint32_t *out, uint32_t count
 #ifdef STREAMVBYTE_X64
   if(streamvbyte_sse41()) {
     simd_count &= ~31U;
-    dataPtr = svb_decode_sse41_simple(out, keyPtr, dataPtr, simd_count);
+    dataPtr = branchy
+                  ? svb_decode_sse41_branchy(out, keyPtr, dataPtr, simd_count)
+                  : svb_decode_sse41_simple(out, keyPtr, dataPtr, simd_count);
     out += simd_count;
     keyPtr += simd_count / 4;
     count -= simd_count;
   }
 #elif defined(STREAMVBYTE_IS_ARM64)
   simd_count &= ~3U;
-  dataPtr = svb_decode_vector(out, keyPtr, dataPtr, simd_count);
+  dataPtr = branchy
+                ? svb_decode_vector_branchy(out, keyPtr, dataPtr, simd_count)
+                : svb_decode_vector(out, keyPtr, dataPtr, simd_count);
   out += simd_count;
   keyPtr += simd_count / 4;
   count -= simd_count;
@@ -87,20 +120,33 @@ static inline size_t svb_decode(const uint8_t *in, uint32_t *out, uint32_t count
   (void)simd_count;
 #endif
 
+  if (branchy)
+    return (size_t)(svb_decode_scalar_branchy(out, keyPtr, dataPtr, count) - in);
   return (size_t)(svb_decode_scalar(out, keyPtr, dataPtr, count) - in);
 }
 
+// Each value uses at least one data byte. Leave at least 16 values for
+// scalar decoding so every preceding 16-byte SIMD load stays in the stream.
+// Round down to whole SIMD batches in svb_decode, preserving key boundaries.
+static inline uint32_t svb_unpadded_simd_count(uint32_t count) {
+  return count > STREAMVBYTE_PADDING ? count - STREAMVBYTE_PADDING : 0;
+}
+
 size_t streamvbyte_decode(const uint8_t *in, uint32_t *out, uint32_t count) {
-  return svb_decode(in, out, count, count);
+  return svb_decode(in, out, count, count, false);
 }
 
 size_t streamvbyte_decode_unpadded(const uint8_t *in, uint32_t *out, uint32_t count) {
-  // Each value uses at least one data byte. Leave at least 16 values for
-  // scalar decoding so every preceding 16-byte SIMD load stays in the stream.
-  // Round down to whole SIMD batches in svb_decode, preserving key boundaries.
-  const uint32_t simd_count = count > STREAMVBYTE_PADDING
-                                 ? count - STREAMVBYTE_PADDING : 0;
-  return svb_decode(in, out, count, simd_count);
+  return svb_decode(in, out, count, svb_unpadded_simd_count(count), false);
+}
+
+size_t streamvbyte_decode_branchy(const uint8_t *in, uint32_t *out, uint32_t count) {
+  return svb_decode(in, out, count, count, true);
+}
+
+size_t streamvbyte_decode_unpadded_branchy(const uint8_t *in, uint32_t *out,
+                                           uint32_t count) {
+  return svb_decode(in, out, count, svb_unpadded_simd_count(count), true);
 }
 
 bool streamvbyte_validate_stream(const uint8_t *in, size_t inCount,

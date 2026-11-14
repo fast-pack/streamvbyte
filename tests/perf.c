@@ -52,6 +52,19 @@ static void bench_delta_decode(void *ud) {
   (void)r;
 }
 
+static void bench_delta_decode_branchy(void *ud) {
+  svb_ctx *ctx = (svb_ctx *)ud;
+  size_t r = streamvbyte_delta_decode_branchy(ctx->compressedbuffer, ctx->recovdata,
+                                      (uint32_t)ctx->n, 0);
+  (void)r;
+}
+
+static void bench_decode_branchy(void *ud) {
+  svb_ctx *ctx = (svb_ctx *)ud;
+  size_t r = streamvbyte_decode_branchy(ctx->compressedbuffer, ctx->recovdata, (uint32_t)ctx->n);
+  (void)r;
+}
+
 static void bench_decode_unpadded(void *ud) {
   svb_ctx *ctx = (svb_ctx *)ud;
   size_t r = streamvbyte_decode_unpadded(ctx->compressedbuffer, ctx->recovdata, (uint32_t)ctx->n);
@@ -106,9 +119,18 @@ static void fill_small(uint32_t *data, size_t n) {
     data[k] = (uint32_t)rand() & 0xFFu;
 }
 
+static void fill_four_byte(uint32_t *data, size_t n) {
+  for (size_t k = 0; k < n; ++k) {
+    uint32_t hi = (uint32_t)rand();
+    uint32_t lo = (uint32_t)rand();
+    data[k] = ((hi << 16) ^ lo) | 0x01000000u;
+  }
+}
+
 static void run_benchmark(const char *title, void (*fill)(uint32_t *, size_t),
                           uint32_t *datain, uint8_t *compressedbuffer,
                           uint32_t *recovdata, int have_counters) {
+  srand(12345);
   fill(datain, N);
 
   svb_ctx ctx;
@@ -133,6 +155,9 @@ static void run_benchmark(const char *title, void (*fill)(uint32_t *, size_t),
   counters_event_aggregate unpadded = counters_bench(bench_decode_unpadded, &ctx, &params);
   print_aggregate("unpadded", N * sizeof(uint32_t), &unpadded, have_counters);
 
+  counters_event_aggregate branchy = counters_bench(bench_decode_branchy, &ctx, &params);
+  print_aggregate("branchy", N * sizeof(uint32_t), &branchy, have_counters);
+
   size_t compsize2 = streamvbyte_decode(compressedbuffer, recovdata, N);
   if (compsize != compsize2)
     printf("  compsize mismatch: %zu vs %zu\n", compsize, compsize2);
@@ -156,6 +181,7 @@ static void run_delta_benchmark(const char *title,
                                 void (*fill)(uint32_t *, size_t),
                                 uint32_t *datain, uint8_t *compressedbuffer,
                                 uint32_t *recovdata, int have_counters) {
+  srand(12345);
   fill(datain, N);
   for (size_t k = 1; k < N; ++k)
     datain[k] += datain[k - 1];
@@ -180,6 +206,10 @@ static void run_delta_benchmark(const char *title,
   counters_event_aggregate dec =
       counters_bench(bench_delta_decode, &ctx, &params);
   print_aggregate("decode", N * sizeof(uint32_t), &dec, have_counters);
+
+  counters_event_aggregate decb =
+      counters_bench(bench_delta_decode_branchy, &ctx, &params);
+  print_aggregate("branchy", N * sizeof(uint32_t), &decb, have_counters);
 
   size_t compsize2 =
       streamvbyte_delta_decode(compressedbuffer, recovdata, (uint32_t)N, 0);
@@ -226,6 +256,8 @@ int main(void) {
   run_benchmark("log-uniform widths (mixed 1-4 byte)", fill_log_uniform, datain,
                 compressedbuffer, recovdata, have_counters);
   run_benchmark("full-range uint32_t (mostly 4-byte)", fill_full_range, datain,
+                compressedbuffer, recovdata, have_counters);
+  run_benchmark("four-byte values [2^24,2^32) (4-byte)", fill_four_byte, datain,
                 compressedbuffer, recovdata, have_counters);
   run_benchmark("small values [0,256) (1-byte)", fill_small, datain,
                 compressedbuffer, recovdata, have_counters);

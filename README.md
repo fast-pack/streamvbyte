@@ -99,6 +99,23 @@ still require padding. Encoder buffer requirements are unchanged; encode into
 a buffer of at least `streamvbyte_max_compressedbytes(N)` bytes, then store or
 copy the returned number of bytes.
 
+If your data often has long runs of values of the same width (e.g., small
+counters or term frequencies that fit in one byte, or hashes and random 32-bit
+identifiers that need four bytes), you may try the branchy decoders:
+```C
+streamvbyte_decode_branchy(compressedbuffer, recovdata, N);
+streamvbyte_decode_unpadded_branchy(compressedbuffer, recovdata, N);
+streamvbyte_decode_0124_branchy(compressedbuffer, recovdata, N);
+streamvbyte_delta_decode_branchy(compressedbuffer, recovdata, N, 0);
+```
+They decode the same formats with the same requirements and results as the
+corresponding regular decoders. They add fast paths for blocks of 32 integers
+that are all 1-byte or all 4-byte values (all zeros or all 4-byte values for
+the `0124` format), and can be several times faster on such data. However,
+they can be 10-25% slower when only some blocks qualify (e.g., mostly small
+values with occasional large ones), since their branches are then hard to
+predict. Benchmark them on your own data.
+
 To verify that the expected size of a stream is correct you may validate it before
 decoding:
 ```C

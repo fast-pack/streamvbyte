@@ -102,4 +102,56 @@ svb_decode_neon_d1_init(uint32_t *out, const uint8_t *__restrict__ keyPtr,
                                    count & 31, prev);
 }
 
+// Like svb_write_neon_d1, but adds the previous value last, so that the
+// loop-carried dependency is only a lane broadcast and an addition.
+static inline uint32x4_t svb_write_neon_d1_short_chain(uint32_t *out,
+                                                       uint32x4_t curr,
+                                                       uint32x4_t prev,
+                                                       uint32x4_t zero) {
+  curr = vaddq_u32(curr, vextq_u32(zero, curr, 3)); // [A AB BC CD]
+  curr = vaddq_u32(curr, vextq_u32(zero, curr, 2)); // [A AB ABC ABCD]
+  curr = vaddq_u32(curr, vdupq_laneq_u32(prev, 3));
+  vst1q_u32(out, curr);
+  return curr;
+}
+
+// Same as svb_decode_neon_d1_init, but a block of 32 4-byte integers (8 key
+// bytes equal to 0xFF) also skips the shuffle. Only used by
+// streamvbyte_delta_decode_branchy.
+static const uint8_t *
+svb_decode_neon_d1_branchy(uint32_t *out, const uint8_t *__restrict__ keyPtr,
+                           const uint8_t *__restrict__ dataPtr, uint32_t count,
+                           uint32_t prev) {
+  uint32_t keybytes = count / 4;
+  uint32x4_t Prev = vdupq_n_u32(prev);
+  const uint32x4_t zero = vdupq_n_u32(0);
+  const uint16x8_t zero16 = vdupq_n_u16(0);
+  for (; keybytes >= 8; keybytes -= 8, keyPtr += 8, out += 32) {
+    uint64_t keys;
+    memcpy(&keys, keyPtr, sizeof(keys));
+    if (keys == 0) { // 32 1-byte deltas: 16-bit prefix sums
+      for (int i = 0; i < 4; i++)
+        Prev = svb_write_16bit_neon_d1(out + 8 * i,
+                                       vmovl_u8(vld1_u8(dataPtr + 8 * i)),
+                                       Prev, zero16);
+      dataPtr += 32;
+    } else if (keys == ~UINT64_C(0)) { // 32 4-byte deltas: no shuffle
+      for (int i = 0; i < 8; i++)
+        Prev = svb_write_neon_d1_short_chain(
+            out + 4 * i, vld1q_u32((const uint32_t *)(dataPtr + 16 * i)), Prev,
+            zero);
+      dataPtr += 128;
+    } else {
+      for (int i = 0; i < 8; ++i) {
+        uint8x16_t data = _decode_neon((uint8_t)keys, &dataPtr);
+        Prev = svb_write_neon_d1(out + 4 * i, vreinterpretq_u32_u8(data), Prev,
+                                 zero);
+        keys >>= 8;
+      }
+    }
+  }
+  return svb_decode_scalar_d1_init(out, keyPtr, dataPtr, count & 31,
+                                   vgetq_lane_u32(Prev, 3));
+}
+
 #endif
