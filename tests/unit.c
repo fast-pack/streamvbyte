@@ -2961,8 +2961,202 @@ static bool issue69(void) {
   return true;
 }
 
+static int test_decode_uniform_keys(void) {
+  const uint32_t max_count = 520;
+  const uint32_t canary_len = 16;
+  const uint32_t canary_val = 0xDEADBEEFU;
+  const uint32_t max_offset = 8;
+
+  size_t in_buf_size = (max_count + max_offset) * sizeof(uint32_t);
+  size_t comp_buf_size =
+      streamvbyte_max_compressedbytes(max_count) + max_offset + 64;
+  size_t out_buf_size =
+      (canary_len + max_count + canary_len + max_offset) * sizeof(uint32_t);
+
+  uint32_t *raw_in = malloc(in_buf_size);
+  uint8_t *raw_comp = malloc(comp_buf_size);
+  uint32_t *raw_out = malloc(out_buf_size);
+
+  size_t inputPageSize = 0, outputPageSize = 0;
+  uint8_t *inputPage = guardedpage(&inputPageSize);
+  uint8_t *outputPage = guardedpage(&outputPageSize);
+  if (!inputPage || !outputPage || inputPageSize < comp_buf_size ||
+      outputPageSize < max_count * sizeof(uint32_t)) {
+    if (inputPage)
+      freeguardedpage(inputPage, inputPageSize);
+    if (outputPage)
+      freeguardedpage(outputPage, outputPageSize);
+    inputPage = NULL;
+    outputPage = NULL;
+  }
+
+  if (!raw_in || !raw_comp || !raw_out) {
+    fprintf(stderr, "[test_decode_uniform_keys] allocation failed\n");
+    goto fail;
+  }
+
+  for (uint32_t count = 0; count <= 513; count++) {
+    if (count > 160 && count != 255 && count != 256 && count != 257 &&
+        count != 511 && count != 512 && count != 513) {
+      continue;
+    }
+
+    for (int pattern = 0; pattern < 6; pattern++) {
+      for (uint32_t i = 0; i < count; i++) {
+        uint32_t blk = i / 32;
+        if (pattern == 0) {
+          /* All 1-byte values (keys == 0), distinct per lane */
+          raw_in[i] = (i * 7U + 3U) & 0xFFU;
+        } else if (pattern == 1) {
+          /* All 4-byte values (keys == ~0ULL), distinct per byte & lane */
+          raw_in[i] = 0x01020300U + ((i * 0x01010101U) & 0x7E7F7FFFU);
+        } else if (pattern == 2) {
+          /* Alternating 32-value blocks: keys == 0 <-> keys == ~0ULL */
+          if ((blk & 1U) == 0) {
+            raw_in[i] = (i * 13U + 1U) & 0xFFU;
+          } else {
+            raw_in[i] = 0x10203000U + i * 257U;
+          }
+        } else if (pattern == 3) {
+          /* Transitions: keys == 0 -> mixed -> keys == ~0ULL -> mixed */
+          if ((blk & 3U) == 0) {
+            raw_in[i] = (i * 5U + 9U) & 0xFFU;
+          } else if ((blk & 3U) == 2) {
+            raw_in[i] = 0x80000000U | (i * 0x00010203U);
+          } else {
+            uint32_t w = i & 3U;
+            raw_in[i] = (w == 0)   ? (i & 0xFFU)
+                        : (w == 1) ? (0x0100U + (i & 0xFFU))
+                        : (w == 2) ? (0x010000U + (i & 0xFFFFU))
+                                   : (0x01000000U + i);
+          }
+        } else if (pattern == 4) {
+          /* Near-miss keys == 0: 31 one-byte values and 1 wider value */
+          raw_in[i] = ((i % 32) == (blk % 32)) ? (0x0100U + i) : (i & 0xFFU);
+        } else {
+          /* Near-miss keys == ~0ULL: 31 four-byte values and 1 narrower value
+           */
+          raw_in[i] =
+              ((i % 32) == (blk % 32)) ? (i & 0xFFU) : (0x01000000U + i * 17U);
+        }
+      }
+
+      uint32_t offset_step = (count <= 64 || count >= 255) ? 1 : 7;
+      for (uint32_t offset_comp = 0; offset_comp < 8;
+           offset_comp += offset_step) {
+        for (uint32_t out_offset = 0; out_offset < 4;
+             out_offset += (offset_step == 1 ? 1 : 3)) {
+          uint8_t *comp = raw_comp + offset_comp;
+          uint32_t *out_base = raw_out + out_offset;
+          uint32_t *out = out_base + canary_len;
+
+          memset(raw_comp, 0xCC, comp_buf_size);
+          size_t comp_len = streamvbyte_encode(raw_in, count, comp);
+
+          /* 1. Test streamvbyte_decode with canaries */
+          for (uint32_t k = 0; k < canary_len + count + canary_len; k++) {
+            out_base[k] = canary_val;
+          }
+          size_t dec_len = streamvbyte_decode(comp, out, count);
+          if (dec_len != comp_len) {
+            fprintf(stderr,
+                    "[test_decode_uniform_keys] decode len mismatch: "
+                    "dec=%zu comp=%zu (count=%u, pattern=%d)\n",
+                    dec_len, comp_len, count, pattern);
+            goto fail;
+          }
+          for (uint32_t k = 0; k < canary_len; k++) {
+            if (out_base[k] != canary_val || out[count + k] != canary_val) {
+              fprintf(stderr,
+                      "[test_decode_uniform_keys] decode canary clobbered "
+                      "(count=%u, pattern=%d)\n",
+                      count, pattern);
+              goto fail;
+            }
+          }
+          for (uint32_t k = 0; k < count; k++) {
+            if (out[k] != raw_in[k]) {
+              fprintf(stderr,
+                      "[test_decode_uniform_keys] decode mismatch at %u: "
+                      "got=0x%08X expected=0x%08X (count=%u, pattern=%d)\n",
+                      k, out[k], raw_in[k], count, pattern);
+              goto fail;
+            }
+          }
+
+          /* 2. Test streamvbyte_decode_unpadded (with guard page when count >
+           * 0) */
+          for (uint32_t k = 0; k < canary_len + count + canary_len; k++) {
+            out_base[k] = canary_val;
+          }
+          size_t unpadded_len = streamvbyte_decode_unpadded(comp, out, count);
+          if (unpadded_len != comp_len) {
+            fprintf(stderr,
+                    "[test_decode_uniform_keys] unpadded len mismatch "
+                    "(count=%u, pattern=%d)\n",
+                    count, pattern);
+            goto fail;
+          }
+          for (uint32_t k = 0; k < count; k++) {
+            if (out[k] != raw_in[k]) {
+              fprintf(stderr,
+                      "[test_decode_uniform_keys] unpadded mismatch at %u "
+                      "(count=%u, pattern=%d)\n",
+                      k, count, pattern);
+              goto fail;
+            }
+          }
+          if (count > 0 && inputPage && outputPage && offset_comp == 0 &&
+              out_offset == 0) {
+            uint8_t *guardedIn = inputPage + inputPageSize - comp_len;
+            uint32_t *guardedOut =
+                (uint32_t *)(outputPage + outputPageSize) - count;
+            memcpy(guardedIn, comp, comp_len);
+            size_t g_len =
+                streamvbyte_decode_unpadded(guardedIn, guardedOut, count);
+            if (g_len != comp_len ||
+                memcmp(guardedOut, raw_in, count * sizeof(uint32_t)) != 0) {
+              fprintf(stderr,
+                      "[test_decode_uniform_keys] guarded unpadded failed "
+                      "(count=%u, pattern=%d)\n",
+                      count, pattern);
+              goto fail;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (inputPage)
+    freeguardedpage(inputPage, inputPageSize);
+  if (outputPage)
+    freeguardedpage(outputPage, outputPageSize);
+  free(raw_in);
+  free(raw_comp);
+  free(raw_out);
+  return 0;
+
+fail:
+  if (inputPage)
+    freeguardedpage(inputPage, inputPageSize);
+  if (outputPage)
+    freeguardedpage(outputPage, outputPageSize);
+  free(raw_in);
+  free(raw_comp);
+  free(raw_out);
+  return -1;
+}
+
 int main(void) {
-  if (!unpaddedtests()) { printf("tests failed.\n"); return EXIT_FAILURE; }
+  if (!unpaddedtests()) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
+  if (test_decode_uniform_keys() == -1) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
   if (!issue42()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (!issue69()) { printf("tests failed.\n"); return EXIT_FAILURE; }
   if (zigzagtests() == -1) { printf("tests failed.\n"); return EXIT_FAILURE; }
