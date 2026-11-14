@@ -1,6 +1,7 @@
 
 
 #include "streamvbyte_isadetection.h"
+#include <string.h> // for memcpy
 #ifdef STREAMVBYTE_ARM
 #include "streamvbyte_shuffle_tables_decode.h"
 #ifdef STREAMVBYTE_IS_ARM64
@@ -46,9 +47,33 @@ static void streamvbyte_decode_quad(const uint8_t *__restrict__ *dataPtrPtr,
 #endif
 }
 
-static const uint8_t *svb_decode_vector(uint32_t *out, const uint8_t *keyPtr, const uint8_t *dataPtr, uint32_t count) {
-  for(uint32_t i = 0; i < count/4; i++)
-    streamvbyte_decode_quad( &dataPtr, keyPtr[i], out + 4*i );
+static const uint8_t *svb_decode_vector(uint32_t *__restrict__ out,
+                                        const uint8_t *__restrict__ keyPtr,
+                                        const uint8_t *__restrict__ dataPtr,
+                                        uint32_t count) {
+  uint32_t keybytes = count / 4;
+  while (keybytes >= 8) {
+    // Load 8 keys (32 integers) at once and consume them from a register.
+    uint64_t keys;
+    memcpy(&keys, keyPtr, sizeof(keys));
+    // Keep this loop rolled: when the compiler unrolls it, decoding is
+    // 10-15% slower on Apple M4 (both clang and GCC). Note that the opposite
+    // holds on x64, where the hand-unrolled loop is faster.
+#if defined(__clang__)
+#pragma clang loop unroll(disable)
+#elif defined(__GNUC__)
+#pragma GCC unroll 1
+#endif
+    for (uint32_t i = 0; i < 8; i++) {
+      streamvbyte_decode_quad(&dataPtr, (uint8_t)keys, out + 4 * i);
+      keys >>= 8;
+    }
+    out += 32;
+    keyPtr += 8;
+    keybytes -= 8;
+  }
+  for (uint32_t i = 0; i < keybytes; i++)
+    streamvbyte_decode_quad(&dataPtr, keyPtr[i], out + 4 * i);
 
   return dataPtr;
 }
