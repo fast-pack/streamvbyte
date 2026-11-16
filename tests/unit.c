@@ -4221,10 +4221,224 @@ fail:
   return -1;
 }
 
+static int isadetectiontests(void) {
+#if defined(STREAMVBYTE_IS_ARM64)
+  if ((streamvbyte_detect_supported_architectures() & streamvbyte_NEON) !=
+      streamvbyte_NEON) {
+    printf("[isadetectiontests] ARM64 failed to report streamvbyte_NEON\n");
+    return -1;
+  }
+#endif
+  return 0;
+}
+
+static int all256keystest(void) {
+  // Representative values with distinct non-zero bytes for codes 0, 1, 2, 3
+  // (lengths 1, 2, 3, 4 bytes)
+  const uint32_t sample_vals[4] = {
+      0x0000005AU, // code 0: 1 byte  (5A)
+      0x00001234U, // code 1: 2 bytes (34 12)
+      0x00456789U, // code 2: 3 bytes (89 67 45)
+      0x89ABCDEFU  // code 3: 4 bytes (EF CD AB 89)
+  };
+  enum { COMP_CANARY_LEN = 32 };
+  const uint8_t comp_canary_byte = 0xCC;
+  uint8_t raw_compressed[COMP_CANARY_LEN + 128 + COMP_CANARY_LEN];
+  uint32_t decoded[12];
+
+  // Part 1: Test each of the 256 control keys (0x00..0xFF) across tail counts
+  // count in {4, 5, 6, 7} and unaligned buffer offsets in {0, 1, 2, 3}
+  for (size_t offset = 0; offset < 4; ++offset) {
+    uint8_t *compressed = raw_compressed + COMP_CANARY_LEN + offset;
+    for (uint32_t count = 4; count <= 7; ++count) {
+      for (uint32_t key = 0; key < 256; ++key) {
+        uint32_t in[7];
+        size_t expected_data_len = 0;
+        uint8_t expected_bytes[32];
+        uint8_t expected_tail_key = 0;
+
+        for (uint32_t lane = 0; lane < count; ++lane) {
+          uint32_t code =
+              (lane < 4) ? ((key >> (2 * lane)) & 0x3U) : ((key + lane) & 0x3U);
+          uint32_t len = code + 1;
+          in[lane] = sample_vals[code];
+          if (lane >= 4) {
+            expected_tail_key |= (uint8_t)(code << (2 * (lane - 4)));
+          }
+          for (uint32_t b = 0; b < len; ++b) {
+            expected_bytes[expected_data_len++] =
+                (uint8_t)((in[lane] >> (8 * b)) & 0xFFU);
+          }
+        }
+
+        size_t key_bytes = (count + 3) / 4;
+        memset(raw_compressed, comp_canary_byte, sizeof(raw_compressed));
+
+        size_t compsize = streamvbyte_encode(in, count, compressed);
+        if (compsize != key_bytes + expected_data_len) {
+          printf("[all256keystest] key=0x%02x count=%u compsize=%zu != "
+                 "expected=%zu\n",
+                 (unsigned)key, count, compsize, key_bytes + expected_data_len);
+          return -1;
+        }
+        if (compressed[0] != (uint8_t)key) {
+          printf("[all256keystest] key=0x%02x encoded_key0=0x%02x\n",
+                 (unsigned)key, (unsigned)compressed[0]);
+          return -1;
+        }
+        if (count > 4 && compressed[1] != expected_tail_key) {
+          printf("[all256keystest] key=0x%02x count=%u encoded_key1=0x%02x != "
+                 "0x%02x\n",
+                 (unsigned)key, count, (unsigned)compressed[1],
+                 (unsigned)expected_tail_key);
+          return -1;
+        }
+        if (memcmp(compressed + key_bytes, expected_bytes, expected_data_len) !=
+            0) {
+          printf("[all256keystest] key=0x%02x count=%u payload mismatch\n",
+                 (unsigned)key, count);
+          return -1;
+        }
+        for (size_t bi = 0; bi < COMP_CANARY_LEN + offset; ++bi) {
+          if (raw_compressed[bi] != comp_canary_byte) {
+            printf("[all256keystest] key=0x%02x count=%u pre-canary clobbered "
+                   "at %zu\n",
+                   (unsigned)key, count, bi);
+            return -1;
+          }
+        }
+        size_t max_allowed = streamvbyte_max_compressedbytes(count);
+        for (size_t ai = COMP_CANARY_LEN + offset + max_allowed;
+             ai < sizeof(raw_compressed); ++ai) {
+          if (raw_compressed[ai] != comp_canary_byte) {
+            printf("[all256keystest] key=0x%02x count=%u post-canary clobbered "
+                   "at %zu\n",
+                   (unsigned)key, count, ai);
+            return -1;
+          }
+        }
+
+        for (int dec_mode = 0; dec_mode < 4; ++dec_mode) {
+          for (size_t i = 0; i < 12; ++i) {
+            decoded[i] = 0xDEADBEEFU;
+          }
+          size_t usedbytes =
+              (dec_mode == 0) ? streamvbyte_decode(compressed, decoded, count)
+              : (dec_mode == 1)
+                  ? streamvbyte_decode_unpadded(compressed, decoded, count)
+              : (dec_mode == 2)
+                  ? streamvbyte_decode_branchy(compressed, decoded, count)
+                  : streamvbyte_decode_unpadded_branchy(compressed, decoded,
+                                                        count);
+          if (usedbytes != compsize) {
+            printf("[all256keystest] key=0x%02x count=%u mode=%d usedbytes=%zu "
+                   "!= compsize=%zu\n",
+                   (unsigned)key, count, dec_mode, usedbytes, compsize);
+            return -1;
+          }
+          for (uint32_t lane = 0; lane < count; ++lane) {
+            if (decoded[lane] != in[lane]) {
+              printf("[all256keystest] key=0x%02x count=%u mode=%d lane=%u "
+                     "mismatch\n",
+                     (unsigned)key, count, dec_mode, lane);
+              return -1;
+            }
+          }
+          for (uint32_t lane = count; lane < 12; ++lane) {
+            if (decoded[lane] != 0xDEADBEEFU) {
+              printf("[all256keystest] key=0x%02x count=%u mode=%d canary "
+                     "clobbered at lane %u\n",
+                     (unsigned)key, count, dec_mode, lane);
+              return -1;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Part 2: Multi-quad stream with all 256 keys in forward and reverse order
+  // (512 quads = 2048 integers) to test every 4th-integer overwrite transition
+  const uint32_t total_quads = 512;
+  const uint32_t total_ints = total_quads * 4;
+  uint32_t *stream_in = malloc(total_ints * sizeof(uint32_t));
+  uint8_t *stream_comp = malloc(streamvbyte_max_compressedbytes(total_ints));
+  uint32_t *stream_out = malloc(total_ints * sizeof(uint32_t));
+  if (!stream_in || !stream_comp || !stream_out) {
+    free(stream_in);
+    free(stream_comp);
+    free(stream_out);
+    return -1;
+  }
+
+  size_t expected_stream_bytes = total_quads; // 512 key bytes
+  for (uint32_t q = 0; q < total_quads; ++q) {
+    uint32_t key = (q < 256) ? q : (511 - q);
+    for (int lane = 0; lane < 4; ++lane) {
+      uint32_t code = (key >> (2 * lane)) & 0x3U;
+      stream_in[q * 4 + lane] = sample_vals[code];
+      expected_stream_bytes += (code + 1);
+    }
+  }
+
+  size_t total_comp = streamvbyte_encode(stream_in, total_ints, stream_comp);
+  if (total_comp != expected_stream_bytes ||
+      !streamvbyte_validate_stream(stream_comp, total_comp, total_ints)) {
+    printf("[all256keystest] multi-quad encode/validate failed\n");
+    free(stream_in);
+    free(stream_comp);
+    free(stream_out);
+    return -1;
+  }
+
+  for (uint32_t q = 0; q < total_quads; ++q) {
+    uint32_t key = (q < 256) ? q : (511 - q);
+    if (stream_comp[q] != (uint8_t)key) {
+      printf("[all256keystest] multi-quad key mismatch at q=%u\n", q);
+      free(stream_in);
+      free(stream_comp);
+      free(stream_out);
+      return -1;
+    }
+  }
+
+  size_t total_used = streamvbyte_decode(stream_comp, stream_out, total_ints);
+  if (total_used != total_comp ||
+      memcmp(stream_in, stream_out, total_ints * sizeof(uint32_t)) != 0) {
+    printf("[all256keystest] multi-quad decode mismatch\n");
+    free(stream_in);
+    free(stream_comp);
+    free(stream_out);
+    return -1;
+  }
+
+  free(stream_in);
+  free(stream_comp);
+  free(stream_out);
+  return 0;
+}
+
 int main(void) {
-  if (!unpaddedtests()) { printf("tests failed.\n"); return EXIT_FAILURE; }
-  if (!branchytests()) { printf("tests failed.\n"); return EXIT_FAILURE; }
-  if (test_decode_uniform_keys() == -1) { printf("tests failed.\n"); return EXIT_FAILURE; }
+  if (!unpaddedtests()) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
+  if (isadetectiontests() == -1) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
+  if (all256keystest() == -1) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
+  if (!branchytests()) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
+  if (test_decode_uniform_keys() == -1) {
+    printf("tests failed.\n");
+    return EXIT_FAILURE;
+  }
   if (test_delta_encode_neon() == -1) {
     printf("tests failed.\n");
     return EXIT_FAILURE;

@@ -2,7 +2,7 @@
 #define STREAMVBYTE_SHUFFLE_TABLES_H
 #include <stdint.h>
 // using 1,2,3,4 bytes per value
-static uint8_t lengthTable[256] ={
+static const uint8_t lengthTable[256] ={
   4,  5,  6,  7,  5,  6,  7,  8,  6,  7,  8,  9,  7,  8,  9, 10,
   5,  6,  7,  8,  6,  7,  8,  9,  7,  8,  9, 10,  8,  9, 10, 11,
   6,  7,  8,  9,  7,  8,  9, 10,  8,  9, 10, 11,  9, 10, 11, 12,
@@ -22,7 +22,7 @@ static uint8_t lengthTable[256] ={
  };
 
 // decoding:
-static int8_t shuffleTable[256][16] = {
+static const int8_t shuffleTable[256][16] = {
  {  0, -1, -1, -1,  1, -1, -1, -1,  2, -1, -1, -1,  3, -1, -1, -1 },    // 0000
  {  0,  1, -1, -1,  2, -1, -1, -1,  3, -1, -1, -1,  4, -1, -1, -1 },    // 1000
  {  0,  1,  2, -1,  3, -1, -1, -1,  4, -1, -1, -1,  5, -1, -1, -1 },    // 2000
