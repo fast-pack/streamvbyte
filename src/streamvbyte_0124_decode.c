@@ -19,8 +19,8 @@ static inline __m128i svb_decode_sse41(uint32_t key,
                                   const uint8_t *__restrict__ *dataPtrPtr) {
   uint8_t len;
   __m128i Data = _mm_loadu_si128((const __m128i *)*dataPtrPtr);
-  uint8_t *pshuf = (uint8_t *) &shuffleTable[key];
-  __m128i Shuf = *(__m128i *)pshuf;
+  const uint8_t *pshuf = (const uint8_t *)&shuffleTable[key];
+  __m128i Shuf = _mm_loadu_si128((const __m128i *)pshuf);
   len = lengthTable[key];
   Data = _mm_shuffle_epi8(Data, Shuf);
   *dataPtrPtr += len;
