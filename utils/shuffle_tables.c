@@ -9,7 +9,7 @@ typedef uint8_t (*code_len_function)(int c);
 
 static uint8_t code_to_length(int c) {
   /* 0,1,2,3 codes-> 1,2,3,4 bytes */
-  return c + 1;
+  return (uint8_t)(c + 1);
 }
 
 static uint8_t code_to_length_0124(int c) {
@@ -50,9 +50,9 @@ static void decoder_permutation(uint8_t *table) {
       int c = extract(code, i);
       int j;
       for( j = 0; j <= c; j++ )
-        *p++ = byte++;
+        *p++ = (uint8_t)byte++;
       for( ; j < 4; j++ )
-        *p++ = -1;
+        *p++ = (uint8_t)-1;
     }
   }
 }
@@ -69,7 +69,7 @@ static void encoder_permutation(uint8_t *table, uint8_t *lengths) {
       int c = extract(full_code, i);
       int j;
       for (j = 0; j <= c; j++)
-        *p++ = 4 * i + j;
+        *p++ = (uint8_t)(4 * i + j);
     }
     for (int i = lengths[full_code]; i < 16; i++)
       *p++ = 0xFF;
@@ -88,13 +88,13 @@ static void decoder_permutation_0124(uint8_t *table) {
         // Here c stands for a number of bytes to copy, i.e. 0,1,2
         int j;
         for( j = 0; j < c; j++ )
-          *p++ = byte++;
+          *p++ = (uint8_t)byte++;
         for( ; j < 4; j++ )
-          *p++ = -1;
+          *p++ = (uint8_t)-1;
       } else {
         // Otherwise always copy all 4 bytes
         for(int j = 0; j < 4; j++ )
-          *p++ = byte++;
+          *p++ = (uint8_t)byte++;
       }
     }
   }
@@ -111,14 +111,14 @@ static void encoder_permutation_0124(uint8_t *table, uint8_t *lengths) {
       int c = extract(code, i);
       if (c < 3) {
         for( int j = 1; j <= c; j++ )
-          *p++ = 4*i + j - 1;
+          *p++ = (uint8_t)(4 * i + j - 1);
       } else {
         for( int j = 0; j <= c; j++ )
-          *p++ = 4*i + j;
+          *p++ = (uint8_t)(4 * i + j);
       }
     }
     for( int i = lengths[code]; i < 16; i++ )
-      *p++ = -1;
+      *p++ = (uint8_t)-1;
   }
 }
 
@@ -193,7 +193,7 @@ int main(int argc, char **argv) {
   printf(";\n\n");
 
   printf("// decoding:\n");
-  printf("static const uint8_t shuffleTable[256][16] = {\n");
+  printf("static const int8_t shuffleTable[256][16] = {\n");
   print_permutation(decoder_table);
   printf("};\n\n");
 
@@ -203,7 +203,7 @@ int main(int argc, char **argv) {
     print_shuf_lut_64(encoder_table);
     printf("};\n");
   } else {
-    printf("static const uint8_t encodingShuffleTable[256][16] = {\n");
+    printf("static const int8_t encodingShuffleTable[256][16] = {\n");
     print_permutation(encoder_table);
     printf("};\n");
   }
