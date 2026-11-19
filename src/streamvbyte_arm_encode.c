@@ -2,8 +2,8 @@
 #include "streamvbyte_shuffle_tables_encode.h"
 #ifdef STREAMVBYTE_ARM
 static const uint8_t pgatherlo[] = {12, 8, 4, 0, 12, 8, 4, 0}; // apparently only used in streamvbyte_encode4
-#define concat (1 | 1 << 10 | 1 << 20 | 1 << 30)
-#define sum (1 | 1 << 8 | 1 << 16 | 1 << 24)
+#define concat (1U | (1U << 10) | (1U << 20) | (1U << 30))
+#define sum (1U | (1U << 8) | (1U << 16) | (1U << 24))
 static const  uint32_t pAggregators[2] = {concat, sum}; // apparently only used in streamvbyte_encode4
 
 static inline size_t streamvbyte_encode4(uint32x4_t data, uint8_t *__restrict__ outData, uint8_t *__restrict__ outCode) {
@@ -35,8 +35,10 @@ static inline size_t streamvbyte_encode4(uint32x4_t data, uint8_t *__restrict__ 
 
   // shuffle in 8-byte chunks
   uint8x16_t databytes = vreinterpretq_u8_u32(data);
-  const uint8_t (*lut)[16] = (const uint8_t (*)[16])shuf_lut;
-  uint8x16_t encodingShuffle = vld1q_u8(lut[code & 0x3F]);
+  const struct {
+    uint8_t b[16];
+  } *lut = (const void *)shuf_lut;
+  uint8x16_t encodingShuffle = vld1q_u8(lut[code & 0x3F].b);
 #ifdef STREAMVBYTE_IS_ARM64
   vst1q_u8(outData, vqtbl1q_u8(databytes, encodingShuffle));
 #else
